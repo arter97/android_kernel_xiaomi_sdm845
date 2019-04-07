@@ -23,15 +23,9 @@ fi
 if [[ "${1}" == "skip" ]] ; then
 	echo "Skipping Compilation"
 else
-	if [[ "$stock" == "1" ]] ; then
-		sed -i -e 's@"want_initramfs"@"skip_initramfs"@g' init/initramfs.c
-	fi
 	echo "Compiling kernel"
 	cp defconfig .config
 	make "$@" || exit 1
-	if [[ "$stock" == "1" ]] ; then
-		sed -i -e 's@"skip_initramfs"@"want_initramfs"@g' init/initramfs.c
-	fi
 fi
 
 echo "Building new ramdisk"
