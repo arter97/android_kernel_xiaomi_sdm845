@@ -9,7 +9,6 @@ VERSION="$(cat version)-$(date +%F | sed s@-@@g)"
 
 if [ -e boot.img ] ; then
 	rm arter97-kernel-$VERSION.zip 2>/dev/null
-	cp boot.img arter97-kernel-$VERSION.img
 
 	# Pack AnyKernel2
 	rm -rf kernelzip
