@@ -614,11 +614,6 @@ static inline void pr_cont_cgroup_path(struct cgroup *cgrp)
 	pr_cont_kernfs_path(cgrp->kn);
 }
 
-static inline struct psi_group *cgroup_psi(struct cgroup *cgrp)
-{
-	return &cgrp->psi;
-}
-
 /*
  * Default Android check for whether the current process is allowed to move a
  * task across cgroups, either because CAP_SYS_NICE is set or because the uid
@@ -627,6 +622,11 @@ static inline struct psi_group *cgroup_psi(struct cgroup *cgrp)
  * Returns 0 if this is allowed, or -EACCES otherwise.
  */
 int subsys_cgroup_allow_attach(struct cgroup_taskset *tset);
+
+static inline struct psi_group *cgroup_psi(struct cgroup *cgrp)
+{
+	return &cgrp->psi;
+}
 
 static inline void cgroup_init_kthreadd(void)
 {
