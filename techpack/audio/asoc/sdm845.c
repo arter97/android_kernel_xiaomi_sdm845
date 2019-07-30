@@ -3026,6 +3026,8 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm_slim_tx_ch_get, msm_slim_tx_ch_put),
 	SOC_ENUM_EXT("SLIM_1_TX Channels", slim_1_tx_chs,
 			msm_slim_tx_ch_get, msm_slim_tx_ch_put),
+	SOC_ENUM_EXT("SLIM_3_TX Channels", slim_3_tx_chs,
+			msm_slim_tx_ch_get, msm_slim_tx_ch_put),
 	SOC_ENUM_EXT("SLIM_5_RX Channels", slim_5_rx_chs,
 			msm_slim_rx_ch_get, msm_slim_rx_ch_put),
 	SOC_ENUM_EXT("SLIM_6_RX Channels", slim_6_rx_chs,
@@ -3048,6 +3050,8 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			slim_rx_bit_format_get, slim_rx_bit_format_put),
 	SOC_ENUM_EXT("SLIM_0_TX Format", slim_0_tx_format,
 			slim_tx_bit_format_get, slim_tx_bit_format_put),
+	SOC_ENUM_EXT("SLIM_3_TX Format", slim_3_tx_format,
+			slim_tx_bit_format_get, slim_tx_bit_format_put),
 	SOC_ENUM_EXT("USB_AUDIO_RX Format", usb_rx_format,
 			usb_audio_rx_format_get, usb_audio_rx_format_put),
 	SOC_ENUM_EXT("USB_AUDIO_TX Format", usb_tx_format,
@@ -3059,6 +3063,8 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 	SOC_ENUM_EXT("SLIM_2_RX SampleRate", slim_2_rx_sample_rate,
 			slim_rx_sample_rate_get, slim_rx_sample_rate_put),
 	SOC_ENUM_EXT("SLIM_0_TX SampleRate", slim_0_tx_sample_rate,
+			slim_tx_sample_rate_get, slim_tx_sample_rate_put),
+	SOC_ENUM_EXT("SLIM_3_TX SampleRate", slim_3_tx_sample_rate,
 			slim_tx_sample_rate_get, slim_tx_sample_rate_put),
 	SOC_ENUM_EXT("SLIM_5_RX SampleRate", slim_5_rx_sample_rate,
 			slim_rx_sample_rate_get, slim_rx_sample_rate_put),
@@ -3267,13 +3273,6 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			ultrasound_power_get, ultrasound_power_put),
 	SOC_SINGLE_EXT("USB Headset Direction", 0, 0, UINT_MAX, 0,
 					usbhs_direction_get, NULL),
-
-	SOC_ENUM_EXT("SLIM_3_TX Channels", slim_3_tx_chs,
-			msm_slim_tx_ch_get, msm_slim_tx_ch_put),
-	SOC_ENUM_EXT("SLIM_3_TX Format", slim_3_tx_format,
-			slim_tx_bit_format_get, slim_tx_bit_format_put),
-	SOC_ENUM_EXT("SLIM_3_TX SampleRate", slim_3_tx_sample_rate,
-			slim_tx_sample_rate_get, slim_tx_sample_rate_put),
 	SOC_SINGLE_MULTI_EXT("TDM Slot Map", SND_SOC_NOPM, 0, 255, 0, 4,
 	NULL, tdm_slot_map_put),
 };
@@ -4372,12 +4371,12 @@ static void *def_tavil_mbhc_cal(void)
 
 	btn_high[0] = 75;
 	btn_high[1] = 260;
-	btn_high[2] = 480;
-	btn_high[3] = 480;
-	btn_high[4] = 480;
-	btn_high[5] = 480;
-	btn_high[6] = 480;
-	btn_high[7] = 480;
+	btn_high[2] = 750;
+	btn_high[3] = 750;
+	btn_high[4] = 750;
+	btn_high[5] = 750;
+	btn_high[6] = 750;
+	btn_high[7] = 750;
 
 	return tavil_wcd_cal;
 }
