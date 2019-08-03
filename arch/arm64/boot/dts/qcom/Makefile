@@ -59,23 +59,7 @@ perseus-p3-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 perseus-mp-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 
 else
-dtb-$(CONFIG_ARCH_SDM845) += sdm845-sim.dtb \
-	sdm845-rumi.dtb \
-	sdm845-mtp.dtb \
-	sdm845-cdp.dtb \
-	sdm845-v2-rumi.dtb \
-	sdm845-v2-mtp.dtb \
-	sdm845-v2-cdp.dtb \
-	sdm845-qrd.dtb \
-	sdm845-v2-qrd.dtb \
-	sdm845-4k-panel-mtp.dtb \
-	sdm845-4k-panel-cdp.dtb \
-	sdm845-4k-panel-qrd.dtb \
-	beryllium-p0-v2.dtb \
-	beryllium-p0-v2.1.dtb \
-	beryllium-p1-v2.1.dtb \
-	beryllium-p2-v2.1.dtb \
-	beryllium-mp-v2.1.dtb
+dtb-$(CONFIG_ARCH_SDM845) += beryllium-mp-v2.1.dtb
 endif
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
