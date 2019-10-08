@@ -322,5 +322,6 @@ zyxel	ZyXEL Communications Corp.
 inven   InvenSense, Inc.
 cy      Parade.
 awinic  Shanghai Awinic Technology Co., Ltd.
+altek	Altek Corporation
 ssp Bcm4775
 ssp,bcm4775 broadcom 4775 gps chip

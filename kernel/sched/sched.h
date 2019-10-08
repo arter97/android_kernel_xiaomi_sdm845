@@ -2973,6 +2973,16 @@ find_first_cpu_bit(struct task_struct *p, const cpumask_t *search_cpus,
 #define find_first_cpu_bit(...) -1
 #endif
 
+#ifdef CONFIG_SMP
+static inline void sched_irq_work_queue(struct irq_work *work)
+{
+	if (likely(cpu_online(raw_smp_processor_id())))
+		irq_work_queue(work);
+	else
+		irq_work_queue_on(work, cpumask_any(cpu_online_mask));
+}
+#endif
+
 #ifdef CONFIG_PACKAGE_RUNTIME_INFO
 void __weak update_task_runtime_info(struct task_struct *tsk, u64 delta, int run_on_bcore)
 {
