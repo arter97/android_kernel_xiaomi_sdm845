@@ -359,6 +359,8 @@ extern struct workqueue_struct *system_freezable_wq;
 extern struct workqueue_struct *system_power_efficient_wq;
 extern struct workqueue_struct *system_freezable_power_efficient_wq;
 
+extern bool wq_online;
+
 extern struct workqueue_struct *
 __alloc_workqueue_key(const char *fmt, unsigned int flags, int max_active,
 	struct lock_class_key *key, const char *lock_name, ...) __printf(1, 6);
@@ -460,6 +462,7 @@ extern unsigned int work_busy(struct work_struct *work);
 extern __printf(1, 2) void set_worker_desc(const char *fmt, ...);
 extern void print_worker_info(const char *log_lvl, struct task_struct *task);
 extern void show_workqueue_state(void);
+extern void wq_worker_comm(char *buf, size_t size, struct task_struct *task);
 
 /**
  * queue_work - queue work on a workqueue
@@ -594,11 +597,20 @@ static inline bool schedule_delayed_work(struct delayed_work *dwork,
 }
 
 /**
+ * delayed_work_busy - See work_busy()
+ * @dwork: the delayed work to be tested
+ */
+static inline unsigned int delayed_work_busy(struct delayed_work *dwork)
+{
+	return work_busy(&dwork->work);
+}
+
+/**
  * keventd_up - is workqueue initialized yet?
  */
 static inline bool keventd_up(void)
 {
-	return system_wq != NULL;
+	return wq_online;
 }
 
 #ifndef CONFIG_SMP
@@ -634,5 +646,8 @@ int workqueue_prepare_cpu(unsigned int cpu);
 int workqueue_online_cpu(unsigned int cpu);
 int workqueue_offline_cpu(unsigned int cpu);
 #endif
+
+int __init workqueue_init_early(void);
+int __init workqueue_init(void);
 
 #endif

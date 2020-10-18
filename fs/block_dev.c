@@ -628,6 +628,7 @@ static void init_once(void *foo)
 #ifdef CONFIG_SYSFS
 	INIT_LIST_HEAD(&bdev->bd_holder_disks);
 #endif
+	bdev->bd_bdi = &noop_backing_dev_info;
 	inode_init_once(&ei->vfs_inode);
 	/* Initialize mutex for freeze. */
 	mutex_init(&bdev->bd_fsfreeze_mutex);
@@ -642,6 +643,12 @@ static void bdev_evict_inode(struct inode *inode)
 	spin_lock(&bdev_lock);
 	list_del_init(&bdev->bd_list);
 	spin_unlock(&bdev_lock);
+	/* Detach inode from wb early as bdi_put() may free bdi->wb */
+	inode_detach_wb(inode);
+	if (bdev->bd_bdi != &noop_backing_dev_info) {
+		bdi_put(bdev->bd_bdi);
+		bdev->bd_bdi = &noop_backing_dev_info;
+	}
 }
 
 static const struct super_operations bdev_sops = {
@@ -711,6 +718,21 @@ static int bdev_set(struct inode *inode, void *data)
 }
 
 static LIST_HEAD(all_bdevs);
+
+/*
+ * If there is a bdev inode for this device, unhash it so that it gets evicted
+ * as soon as last inode reference is dropped.
+ */
+void bdev_unhash_inode(dev_t dev)
+{
+	struct inode *inode;
+
+	inode = ilookup5(blockdev_superblock, hash(dev), bdev_test, &dev);
+	if (inode) {
+		remove_inode_hash(inode);
+		iput(inode);
+	}
+}
 
 struct block_device *bdget(dev_t dev)
 {
@@ -783,12 +805,21 @@ static struct block_device *bd_acquire(struct inode *inode)
 
 	spin_lock(&bdev_lock);
 	bdev = inode->i_bdev;
-	if (bdev) {
+	if (bdev && !inode_unhashed(bdev->bd_inode)) {
 		bdgrab(bdev);
 		spin_unlock(&bdev_lock);
 		return bdev;
 	}
 	spin_unlock(&bdev_lock);
+
+	/*
+	 * i_bdev references block device inode that was already shut down
+	 * (corresponding device got removed).  Remove the reference and look
+	 * up block device inode again just in case new device got
+	 * reestablished under the same device number.
+	 */
+	if (bdev)
+		bd_forget(inode);
 
 	bdev = bdget(inode->i_rdev);
 	if (bdev) {
@@ -1342,6 +1373,9 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 			bd_set_size(bdev, (loff_t)bdev->bd_part->nr_sects << 9);
 			set_init_blocksize(bdev);
 		}
+
+		if (bdev->bd_bdi == &noop_backing_dev_info)
+			bdev->bd_bdi = bdi_get(disk->queue->backing_dev_info);
 	} else {
 		if (bdev->bd_contains == bdev) {
 			ret = 0;
@@ -1596,12 +1630,6 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
 		kill_bdev(bdev);
 
 		bdev_write_inode(bdev);
-		/*
-		 * Detaching bdev inode from its wb in __destroy_inode()
-		 * is too late: the queue which embeds its bdi (along with
-		 * root wb) can be gone as soon as we put_disk() below.
-		 */
-		inode_detach_wb(bdev->bd_inode);
 	}
 	if (bdev->bd_contains == bdev) {
 		if (disk->fops->release)
@@ -1715,6 +1743,9 @@ ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (bdev_read_only(I_BDEV(bd_inode)))
 		return -EPERM;
+
+	if (IS_SWAPFILE(bd_inode))
+		return -ETXTBSY;
 
 	if (!iov_iter_count(from))
 		return 0;

@@ -16,6 +16,7 @@
 #include <linux/interrupt.h>
 #include <linux/export.h>
 #include <linux/user_namespace.h>
+#include <linux/proc_fs.h>
 #include <linux/proc_ns.h>
 
 /*
@@ -168,6 +169,13 @@ void free_uid(struct user_struct *up)
 		local_irq_restore(flags);
 }
 
+#ifdef CONFIG_PACKAGE_RUNTIME_INFO
+void __weak init_package_runtime_info(struct user_struct *user)
+{
+	return;
+}
+#endif
+
 struct user_struct *alloc_uid(kuid_t uid)
 {
 	struct hlist_head *hashent = uidhashentry(uid);
@@ -184,7 +192,9 @@ struct user_struct *alloc_uid(kuid_t uid)
 
 		new->uid = uid;
 		atomic_set(&new->__count, 1);
-
+#ifdef CONFIG_PACKAGE_RUNTIME_INFO
+		init_package_runtime_info(new);
+#endif
 		/*
 		 * Before adding this, check whether we raced
 		 * on adding the same user already..
@@ -201,6 +211,7 @@ struct user_struct *alloc_uid(kuid_t uid)
 		}
 		spin_unlock_irq(&uidhash_lock);
 	}
+	proc_register_uid(uid);
 
 	return up;
 
@@ -222,6 +233,7 @@ static int __init uid_cache_init(void)
 	spin_lock_irq(&uidhash_lock);
 	uid_hash_insert(&root_user, uidhashentry(GLOBAL_ROOT_UID));
 	spin_unlock_irq(&uidhash_lock);
+	proc_register_uid(GLOBAL_ROOT_UID);
 
 	return 0;
 }

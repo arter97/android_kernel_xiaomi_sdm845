@@ -282,6 +282,36 @@ config QCOM_COINCELL
 	  to maintain PMIC register and RTC state in the absence of
 	  external power.
 
+config QCOM_XR_SMRTVWR_MISC
+	tristate "QTI XR SmartVwr Misc driver support"
+	default n
+	help
+	  This driver supports the misc chips power up such as
+	  USB bridge chip, Display Port bridgechip, MIPI switches etc.
+	  This driver initializes gpios, turns on and off gpios, and
+          enables/disables LDOs that are part of XR  Smart Viewer
+	  reference device.
+
+config TUSB1064_XR_MISC
+	tristate "I2C driver for TI TUSB1064 chip for XR"
+	default n
+	help
+	  This i2c driver allows applications to communicate with TI
+	  TUSB1064 USB redriver chip. This redriver chip could be configured
+	  to USB3.1 mode, Display Port 4lane and USB2.0 Mode, and Display Port
+	  2-lane and USB 3.1 modes. This driver allows the XR smart viewer to
+	  put in any one of the above three modes.
+
+config VXR200_XR_MISC
+	tristate "I2C driver for Synaptics VXR7200 chip for XR"
+	default n
+	help
+	  This i2c driver allows applications to communicate with Synaptics
+	  VXR7200 DP2DSI bridge chip. This driver enables the display data
+	  from Display Port and move the data to DSI data path. Thus enabling
+	  the display data from DP to be shown on the display of the XR smart
+	  viewer reference device.
+
 config SGI_GRU
 	tristate "SGI GRU driver"
 	depends on X86_UV && SMP
@@ -478,6 +508,23 @@ config SRAM
 	  This driver allows you to declare a memory region to be managed by
 	  the genalloc API. It is supposed to be used for small on-chip SRAM
 	  areas found on many SoCs.
+
+config HDCP_QSEECOM
+	tristate "QTI High-Bandwidth Digital Content Protection Module"
+	help
+	  This module implements HDCP 2.2 features over external interfaces
+	  such as the DisplayPort interface. It exposes APIs for the interface
+	  driver to communicate with QTI Secure Execution Environment (QSEE)
+	  via the QSEECOM Driver and also communicates with the Receiver via
+	  APIs exposed by the interface driver.
+
+config QSEECOM
+        tristate "QTI Secure Execution Communicator driver"
+        help
+          Provides a communication interface between userspace and
+          QTI Secure Execution Environment (QSEE) using Secure Channel
+          Manager (SCM) interface. It exposes APIs for both userspace and
+          kernel clients.
 
 config VEXPRESS_SYSCFG
 	bool "Versatile Express System Configuration driver"
@@ -766,6 +813,42 @@ config PANEL_BOOT_MESSAGE
 	  An empty message will only clear the display at driver init time. Any other
 	  printf()-formatted message is valid with newline and escape codes.
 
+config UID_SYS_STATS
+	bool "Per-UID statistics"
+	depends on PROFILING && TASK_XACCT && TASK_IO_ACCOUNTING
+	help
+	  Per UID based cpu time statistics exported to /proc/uid_cputime
+	  Per UID based io statistics exported to /proc/uid_io
+	  Per UID based procstat control in /proc/uid_procstat
+
+config UID_SYS_STATS_DEBUG
+	bool "Per-TASK statistics"
+	depends on UID_SYS_STATS
+	default n
+	help
+	  Per TASK based io statistics exported to /proc/uid_io
+
+config MEMORY_STATE_TIME
+	tristate "Memory freq/bandwidth time statistics"
+	depends on PROFILING
+	help
+	  Memory time statistics exported to /sys/kernel/memory_state_time
+
+config QPNP_MISC
+	tristate "QPNP Misc Peripheral"
+	depends on MFD_SPMI_PMIC
+	help
+	  Say 'y' here to include support for the QTI QPNP MISC
+	  peripheral. The MISC peripheral holds the USB ID interrupt
+	  and the driver provides an API to check if this interrupt
+	  is available on the current PMIC chip.
+
+config RTMV20
+	tristate "Ricktek RTMV2.0 driver"
+	default n
+	help
+	  Say Y here if you want to support Ricktek RTMV2.0 device.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -778,4 +861,15 @@ source "drivers/misc/mic/Kconfig"
 source "drivers/misc/genwqe/Kconfig"
 source "drivers/misc/echo/Kconfig"
 source "drivers/misc/cxl/Kconfig"
+source "drivers/misc/fpr_FingerprintCard/Kconfig"
 endmenu
+
+config OKL4_LINK_SHBUF
+	tristate "OKL4 link with shared buffer transport"
+	default y
+	depends on OKL4_GUEST
+	help
+	  Enable driver for OKL4 inter-cell links using the "shared-buffer"
+	  transport. This driver presents the link to Linux as a character device
+	  which can be written to or read from to access the shared memory. An ioctl
+	  on the device is used to send a virtual interrupt to the partner cell.

@@ -25,8 +25,9 @@
 #include <linux/in.h>
 #include <linux/spinlock.h>
 #include <net/net_namespace.h>
-#include "flask.h"
-#include "avc.h"
+//#include "flask.h"
+//#include "avc.h"
+#include "security.h"
 
 struct task_security_struct {
 	u32 osid;		/* SID prior to last execve */
@@ -40,26 +41,6 @@ struct task_security_struct {
 enum label_initialized {
 	LABEL_INVALID,		/* invalid or not initialized */
 	LABEL_INITIALIZED	/* initialized */
-};
-
-struct inode_security_struct {
-	struct inode *inode;	/* back pointer to inode object */
-	union {
-		struct list_head list;	/* list of inode_security_struct */
-		struct rcu_head rcu;	/* for freeing the inode_security_struct */
-	};
-	u32 task_sid;		/* SID of creating task */
-	u32 sid;		/* SID of this object */
-	u16 sclass;		/* security class of this object */
-	unsigned char initialized;	/* initialization flag */
-	struct mutex lock;
-};
-
-struct file_security_struct {
-	u32 sid;		/* SID of open file description */
-	u32 fown_sid;		/* SID of file owner (for SIGIO) */
-	u32 isid;		/* SID of inode at the time of file open */
-	u32 pseqno;		/* Policy seqno at the time of file open */
 };
 
 struct superblock_security_struct {
@@ -104,28 +85,16 @@ struct netport_security_struct {
 	u8 protocol;			/* transport protocol */
 };
 
-struct sk_security_struct {
-#ifdef CONFIG_NETLABEL
-	enum {				/* NetLabel state */
-		NLBL_UNSET = 0,
-		NLBL_REQUIRE,
-		NLBL_LABELED,
-		NLBL_REQSKB,
-		NLBL_CONNLABELED,
-	} nlbl_state;
-	struct netlbl_lsm_secattr *nlbl_secattr; /* NetLabel sec attributes */
-#endif
-	u32 sid;			/* SID of this object */
-	u32 peer_sid;			/* SID of peer */
-	u16 sclass;			/* sock security class */
-};
-
 struct tun_security_struct {
 	u32 sid;			/* SID for the tun device sockets */
 };
 
 struct key_security_struct {
 	u32 sid;	/* SID of key */
+};
+
+struct bpf_security_struct {
+	u32 sid;  /*SID of bpf obj creater*/
 };
 
 extern unsigned int selinux_checkreqprot;

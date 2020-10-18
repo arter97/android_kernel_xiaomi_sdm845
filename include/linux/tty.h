@@ -12,7 +12,7 @@
 #include <uapi/linux/tty.h>
 #include <linux/rwsem.h>
 #include <linux/llist.h>
-
+#include <linux/kthread.h>
 
 /*
  * Lock subclasses for tty locks
@@ -82,7 +82,7 @@ static inline char *flag_buf_ptr(struct tty_buffer *b, int ofs)
 
 struct tty_bufhead {
 	struct tty_buffer *head;	/* Queue head */
-	struct work_struct work;
+	struct kthread_work work;
 	struct mutex	   lock;
 	atomic_t	   priority;
 	struct tty_buffer sentinel;
@@ -241,6 +241,8 @@ struct tty_port {
 						   based drain is needed else
 						   set to size of fifo */
 	struct kref		kref;		/* Ref counter */
+	struct kthread_worker   worker;         /* worker thread */
+	struct task_struct      *worker_thread; /* worker thread */
 };
 
 /* tty_port::iflags bits -- use atomic bit ops */
@@ -313,6 +315,10 @@ struct tty_struct {
 	wait_queue_head_t write_wait;
 	wait_queue_head_t read_wait;
 	struct work_struct hangup_work;
+#if defined(CONFIG_TTY_FLUSH_LOCAL_ECHO)
+	int delayed_work;
+	struct delayed_work echo_delayed_work;
+#endif
 	void *disc_data;
 	void *driver_data;
 	spinlock_t files_lock;		/* protects tty_files list */
@@ -658,6 +664,8 @@ static inline int tty_port_users(struct tty_port *port)
 {
 	return port->count + port->blocked_open;
 }
+extern int tty_port_set_policy(struct tty_port *port, int policy,
+			       int sched_priority);
 
 extern int tty_register_ldisc(int disc, struct tty_ldisc_ops *new_ldisc);
 extern int tty_unregister_ldisc(int disc);

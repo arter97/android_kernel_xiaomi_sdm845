@@ -40,6 +40,7 @@
  * rfc3962 includes errata information in its Appendix A.
  */
 
+#include <crypto/algapi.h>
 #include <crypto/internal/skcipher.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -103,7 +104,7 @@ static int cts_cbc_encrypt(struct skcipher_request *req)
 	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int bsize = crypto_skcipher_blocksize(tfm);
-	u8 d[bsize * 2] __attribute__ ((aligned(__alignof__(u32))));
+	u8 d[MAX_CIPHER_BLOCKSIZE * 2] __attribute__ ((aligned(__alignof__(u32))));
 	struct scatterlist *sg;
 	unsigned int offset;
 	int lastn;
@@ -183,7 +184,7 @@ static int cts_cbc_decrypt(struct skcipher_request *req)
 	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int bsize = crypto_skcipher_blocksize(tfm);
-	u8 d[bsize * 2] __attribute__ ((aligned(__alignof__(u32))));
+	u8 d[MAX_CIPHER_BLOCKSIZE * 2] __attribute__ ((aligned(__alignof__(u32))));
 	struct scatterlist *sg;
 	unsigned int offset;
 	u8 *space;
@@ -290,7 +291,7 @@ static int crypto_cts_init_tfm(struct crypto_skcipher *tfm)
 	unsigned bsize;
 	unsigned align;
 
-	cipher = crypto_spawn_skcipher2(spawn);
+	cipher = crypto_spawn_skcipher(spawn);
 	if (IS_ERR(cipher))
 		return PTR_ERR(cipher);
 
@@ -348,9 +349,9 @@ static int crypto_cts_create(struct crypto_template *tmpl, struct rtattr **tb)
 	spawn = skcipher_instance_ctx(inst);
 
 	crypto_set_skcipher_spawn(spawn, skcipher_crypto_instance(inst));
-	err = crypto_grab_skcipher2(spawn, cipher_name, 0,
-				    crypto_requires_sync(algt->type,
-							 algt->mask));
+	err = crypto_grab_skcipher(spawn, cipher_name, 0,
+				   crypto_requires_sync(algt->type,
+							algt->mask));
 	if (err)
 		goto err_free_inst;
 

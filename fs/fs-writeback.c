@@ -1804,8 +1804,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * safe.
 		 */
 		if (work->for_kupdate) {
-			dirtied_before = jiffies -
-				msecs_to_jiffies(dirty_expire_interval * 10);
+			dirtied_before = jiffies - (30 * HZ);
 		} else if (work->for_background)
 			dirtied_before = jiffies;
 
@@ -2168,7 +2167,7 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 	    (dirtytime && (inode->i_state & I_DIRTY_INODE)))
 		return;
 
-	if (unlikely(block_dump))
+	if (unlikely(block_dump > 1))
 		block_dump___mark_inode_dirty(inode);
 
 	spin_lock(&inode->i_lock);

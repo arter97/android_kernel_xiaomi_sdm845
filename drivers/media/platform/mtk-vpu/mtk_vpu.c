@@ -23,6 +23,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sched.h>
 #include <linux/sizes.h>
+#include <linux/dma-mapping.h>
 
 #include "mtk_vpu.h"
 
@@ -839,7 +840,7 @@ static int mtk_vpu_probe(struct platform_device *pdev)
 	/* Set PTCM to 96K and DTCM to 32K */
 	vpu_cfg_writel(vpu, 0x2, VPU_TCM_CFG);
 
-	vpu->enable_4GB = !!(totalram_pages > (SZ_2G >> PAGE_SHIFT));
+	vpu->enable_4GB = !!(totalram_pages() > (SZ_2G >> PAGE_SHIFT));
 	dev_info(dev, "4GB mode %u\n", vpu->enable_4GB);
 
 	if (vpu->enable_4GB) {

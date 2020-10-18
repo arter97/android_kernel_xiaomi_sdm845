@@ -187,6 +187,33 @@ config INPUT_APMPOWER
 	  To compile this driver as a module, choose M here: the
 	  module will be called apm-power.
 
+config INPUT_KEYRESET
+	bool "Reset key"
+	depends on INPUT
+	select INPUT_KEYCOMBO
+	---help---
+	  Say Y here if you want to reboot when some keys are pressed;
+
+config INPUT_KEYCOMBO
+	bool "Key combo"
+	depends on INPUT
+	---help---
+	  Say Y here if you want to take action when some keys are pressed;
+
+config LAST_TOUCH_EVENTS
+	bool "Last touch events"
+	default n
+	depends on INPUT
+	---help---
+	Say Y here if you want to get last touch events.
+
+config TOUCH_COUNT_DUMP
+	bool "Touch cout dump"
+	default n
+	depends on LAST_TOUCH_EVENTS
+	---help---
+		Say Y here if you want to get last touch events.
+
 comment "Input Device Drivers"
 
 source "drivers/input/keyboard/Kconfig"
@@ -201,7 +228,13 @@ source "drivers/input/touchscreen/Kconfig"
 
 source "drivers/input/misc/Kconfig"
 
+source "drivers/input/sensors/smi130/Kconfig"
+
 source "drivers/input/rmi4/Kconfig"
+
+source "drivers/input/fingerprint/Kconfig"
+
+source "drivers/input/af3018/Kconfig"
 
 endif
 

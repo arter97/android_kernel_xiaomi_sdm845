@@ -19,6 +19,7 @@
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/cpufeature.h>
+#include <asm/elf.h>
 
 #include <linux/bitops.h>
 #include <linux/bug.h>
@@ -33,6 +34,10 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/delay.h>
+#include <linux/of_fdt.h>
+
+char* (*arch_read_hardware_id)(void);
+EXPORT_SYMBOL(arch_read_hardware_id);
 
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
@@ -63,6 +68,17 @@ static const char *const hwcap_str[] = {
 	"atomics",
 	"fphp",
 	"asimdhp",
+	"cpuid",
+	"asimdrdm",
+	"jscvt",
+	"fcma",
+	"lrcpc",
+	"dcpop",
+	"sha3",
+	"sm3",
+	"sm4",
+	"asimddp",
+	"sha512",
 	NULL
 };
 
@@ -108,7 +124,9 @@ static int c_show(struct seq_file *m, void *v)
 	int i, j;
 	bool compat = personality(current->personality) == PER_LINUX32;
 
-	for_each_online_cpu(i) {
+	seq_printf(m, "Processor\t: AArch64 Processor rev %d (%s)\n",
+		read_cpuid_id() & 15, ELF_PLATFORM);
+	for_each_present_cpu(i) {
 		struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, i);
 		u32 midr = cpuinfo->reg_midr;
 
@@ -157,6 +175,11 @@ static int c_show(struct seq_file *m, void *v)
 		seq_printf(m, "CPU part\t: 0x%03x\n", MIDR_PARTNUM(midr));
 		seq_printf(m, "CPU revision\t: %d\n\n", MIDR_REVISION(midr));
 	}
+
+	if (!arch_read_hardware_id)
+		seq_printf(m, "Hardware\t: %s\n", machine_name);
+	else
+		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
 
 	return 0;
 }
@@ -227,7 +250,7 @@ static struct attribute_group cpuregs_attr_group = {
 	.name = "identification"
 };
 
-static int cpuid_add_regs(int cpu)
+static int cpuid_cpu_online(unsigned int cpu)
 {
 	int rc;
 	struct device *dev;
@@ -248,7 +271,7 @@ out:
 	return rc;
 }
 
-static int cpuid_remove_regs(int cpu)
+static int cpuid_cpu_offline(unsigned int cpu)
 {
 	struct device *dev;
 	struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
@@ -264,40 +287,22 @@ static int cpuid_remove_regs(int cpu)
 	return 0;
 }
 
-static int cpuid_callback(struct notifier_block *nb,
-			 unsigned long action, void *hcpu)
-{
-	int rc = 0;
-	unsigned long cpu = (unsigned long)hcpu;
-
-	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_ONLINE:
-		rc = cpuid_add_regs(cpu);
-		break;
-	case CPU_DEAD:
-		rc = cpuid_remove_regs(cpu);
-		break;
-	}
-
-	return notifier_from_errno(rc);
-}
-
 static int __init cpuinfo_regs_init(void)
 {
-	int cpu;
-
-	cpu_notifier_register_begin();
+	int cpu, ret;
 
 	for_each_possible_cpu(cpu) {
 		struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
 
 		kobject_init(&info->kobj, &cpuregs_kobj_type);
-		if (cpu_online(cpu))
-			cpuid_add_regs(cpu);
 	}
-	__hotcpu_notifier(cpuid_callback, 0);
 
-	cpu_notifier_register_done();
+	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "arm64/cpuinfo:online",
+				cpuid_cpu_online, cpuid_cpu_offline);
+	if (ret < 0) {
+		pr_err("cpuinfo: failed to register hotplug callbacks.\n");
+		return ret;
+	}
 	return 0;
 }
 static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
@@ -320,7 +325,8 @@ static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 	if (l1ip == ICACHE_POLICY_AIVIVT)
 		set_bit(ICACHEF_AIVIVT, &__icache_flags);
 
-	pr_info("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip], cpu);
+	pr_debug("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip],
+			cpu);
 }
 
 static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)

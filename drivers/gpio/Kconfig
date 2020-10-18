@@ -12,7 +12,6 @@ config ARCH_HAVE_CUSTOM_GPIO_H
 
 menuconfig GPIOLIB
 	bool "GPIO Support"
-	select ANON_INODES
 	help
 	  This enables GPIO support through the generic GPIO library.
 	  You only need to enable this, if you also want to enable
@@ -21,6 +20,18 @@ menuconfig GPIOLIB
 	  If unsure, say N.
 
 if GPIOLIB
+
+config GPIOLIB_FASTPATH_LIMIT
+	int "Maximum number of GPIOs for fast path"
+	range 32 512
+	default 512
+	help
+	   This adjusts the point at which certain APIs will switch from
+	   using a stack allocated buffer to a dynamically allocated buffer.
+
+	   You shouldn't need to change this unless you really need to
+	   optimize either stack space or performance. Change this carefully
+	   since setting an incorrect value could cause stack corruption.
 
 config OF_GPIO
 	def_bool y
@@ -361,6 +372,25 @@ config GPIO_PXA
 	depends on ARCH_PXA || ARCH_MMP
 	help
 	  Say yes here to support the PXA GPIO device
+
+config GPIO_QPNP_PIN
+	tristate "Qualcomm Technologies, Inc. QPNP GPIO support"
+	depends on SPMI
+	help
+	  Say 'y' here to include support for the Qualcomm Technologies, Inc.
+	  QPNP GPIO driver.  This driver supports Device Tree and allows a
+	  device_node to be registered as a gpio-controller.  It does not handle
+	  GPIO interrupts directly; they are handled via the SPMI arbiter
+	  interrupt driver.
+
+config GPIO_QPNP_PIN_DEBUG
+	bool "Qualcomm Technologies, Inc. QPNP GPIO debug support"
+	depends on GPIO_QPNP_PIN && DEBUG_FS
+	help
+	  Say 'y' here to include debug support for the Qualcomm Technologies,
+	  Inc. QPNP GPIO driver.  This provides a userspace debug interface to
+	  get and set all of the supported features of PMIC GPIO and MPP pins
+	  including those which are managed by the gpio framework.
 
 config GPIO_RCAR
 	tristate "Renesas R-Car GPIO"

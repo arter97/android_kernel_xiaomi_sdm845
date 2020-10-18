@@ -440,10 +440,11 @@ int extcon_sync(struct extcon_dev *edev, unsigned int id)
 		return index;
 
 	spin_lock_irqsave(&edev->lock, flags);
-
 	state = !!(edev->state & BIT(index));
+	spin_unlock_irqrestore(&edev->lock, flags);
 	raw_notifier_call_chain(&edev->nh[index], state, edev);
 
+	spin_lock_irqsave(&edev->lock, flags);
 	/* This could be in interrupt handler */
 	prop_buf = (char *)get_zeroed_page(GFP_ATOMIC);
 	if (!prop_buf) {
@@ -481,6 +482,21 @@ int extcon_sync(struct extcon_dev *edev, unsigned int id)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(extcon_sync);
+
+int extcon_blocking_sync(struct extcon_dev *edev, unsigned int id, u8 val)
+{
+	int index;
+
+	if (!edev)
+		return -EINVAL;
+
+	index = find_cable_index_by_id(edev, id);
+	if (index < 0)
+		return index;
+
+	return blocking_notifier_call_chain(&edev->bnh[index], val, edev);
+}
+EXPORT_SYMBOL(extcon_blocking_sync);
 
 /**
  * extcon_get_state() - Get the state of a external connector.
@@ -921,6 +937,38 @@ int extcon_register_notifier(struct extcon_dev *edev, unsigned int id,
 }
 EXPORT_SYMBOL_GPL(extcon_register_notifier);
 
+int extcon_register_blocking_notifier(struct extcon_dev *edev, unsigned int id,
+			struct notifier_block *nb)
+{
+	int idx = -EINVAL;
+
+	if (!edev || !nb)
+		return -EINVAL;
+
+	idx = find_cable_index_by_id(edev, id);
+	if (idx < 0)
+		return idx;
+
+	return blocking_notifier_chain_register(&edev->bnh[idx], nb);
+}
+EXPORT_SYMBOL(extcon_register_blocking_notifier);
+
+int extcon_unregister_blocking_notifier(struct extcon_dev *edev,
+			unsigned int id, struct notifier_block *nb)
+{
+	int idx;
+
+	if (!edev || !nb)
+		return -EINVAL;
+
+	idx = find_cable_index_by_id(edev, id);
+	if (idx < 0)
+		return idx;
+
+	return blocking_notifier_chain_unregister(&edev->bnh[idx], nb);
+}
+EXPORT_SYMBOL(extcon_unregister_blocking_notifier);
+
 /**
  * extcon_unregister_notifier() - Unregister a notifiee from the extcon device.
  * @edev:	the extcon device that has the external connecotr.
@@ -1199,6 +1247,13 @@ int extcon_dev_register(struct extcon_dev *edev)
 	edev->nh = devm_kzalloc(&edev->dev,
 			sizeof(*edev->nh) * edev->max_supported, GFP_KERNEL);
 	if (!edev->nh) {
+		ret = -ENOMEM;
+		goto err_dev;
+	}
+
+	edev->bnh = devm_kzalloc(&edev->dev,
+			sizeof(*edev->bnh) * edev->max_supported, GFP_KERNEL);
+	if (!edev->bnh) {
 		ret = -ENOMEM;
 		goto err_dev;
 	}

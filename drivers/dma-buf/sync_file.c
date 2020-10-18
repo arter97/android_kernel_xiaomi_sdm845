@@ -27,12 +27,18 @@
 #include <uapi/linux/sync_file.h>
 
 static const struct file_operations sync_file_fops;
+static struct kmem_cache *kmem_sync_file_pool;
+
+void __init init_sync_kmem_pool(void)
+{
+	kmem_sync_file_pool = KMEM_CACHE(sync_file, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+}
 
 static struct sync_file *sync_file_alloc(void)
 {
 	struct sync_file *sync_file;
 
-	sync_file = kzalloc(sizeof(*sync_file), GFP_KERNEL);
+	sync_file = kmem_cache_zalloc(kmem_sync_file_pool, GFP_KERNEL);
 	if (!sync_file)
 		return NULL;
 
@@ -50,7 +56,7 @@ static struct sync_file *sync_file_alloc(void)
 	return sync_file;
 
 err:
-	kfree(sync_file);
+	kmem_cache_free(kmem_sync_file_pool, sync_file);
 	return NULL;
 }
 
@@ -152,6 +158,12 @@ static int sync_file_set_fence(struct sync_file *sync_file,
 			return -ENOMEM;
 
 		sync_file->fence = &array->base;
+
+		/*
+		 * Register for callbacks so that we know when each fence
+		 * in the array is signaled
+		 */
+		fence_enable_sw_signaling(sync_file->fence);
 	}
 
 	return 0;
@@ -279,10 +291,10 @@ static void sync_file_free(struct kref *kref)
 	struct sync_file *sync_file = container_of(kref, struct sync_file,
 						     kref);
 
-	if (test_bit(POLL_ENABLED, &sync_file->fence->flags))
+	if (test_bit(POLL_ENABLED, &sync_file->flags))
 		fence_remove_callback(sync_file->fence, &sync_file->cb);
 	fence_put(sync_file->fence);
-	kfree(sync_file);
+	kmem_cache_free(kmem_sync_file_pool, sync_file);
 }
 
 static int sync_file_release(struct inode *inode, struct file *file)
@@ -299,10 +311,10 @@ static unsigned int sync_file_poll(struct file *file, poll_table *wait)
 
 	poll_wait(file, &sync_file->wq, wait);
 
-	if (!poll_does_not_wait(wait) &&
-	    !test_and_set_bit(POLL_ENABLED, &sync_file->fence->flags)) {
+	if (list_empty(&sync_file->cb.node) &&
+	    !test_and_set_bit(POLL_ENABLED, &sync_file->flags)) {
 		if (fence_add_callback(sync_file->fence, &sync_file->cb,
-				       fence_check_cb_func) < 0)
+					   fence_check_cb_func) < 0)
 			wake_up_all(&sync_file->wq);
 	}
 
@@ -381,6 +393,7 @@ static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
 {
 	struct sync_file_info info;
 	struct sync_fence_info *fence_info = NULL;
+	struct sync_fence_info fence_info_onstack[4] __aligned(8);
 	struct fence **fences;
 	__u32 size;
 	int num_fences, ret, i;
@@ -406,9 +419,15 @@ static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
 		return -EINVAL;
 
 	size = num_fences * sizeof(*fence_info);
-	fence_info = kzalloc(size, GFP_KERNEL);
-	if (!fence_info)
-		return -ENOMEM;
+
+	if (likely(size <= sizeof(fence_info_onstack))) {
+		memset(fence_info_onstack, 0, sizeof(fence_info_onstack));
+		fence_info = fence_info_onstack;
+	} else {
+		fence_info = kzalloc(size, GFP_KERNEL);
+		if (!fence_info)
+			return -ENOMEM;
+	}
 
 	for (i = 0; i < num_fences; i++)
 		sync_fill_fence_info(fences[i], &fence_info[i]);
@@ -430,7 +449,8 @@ no_fences:
 		ret = 0;
 
 out:
-	kfree(fence_info);
+	if (unlikely(fence_info != fence_info_onstack))
+		kfree(fence_info);
 
 	return ret;
 }

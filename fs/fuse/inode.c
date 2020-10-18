@@ -30,7 +30,7 @@ static struct kmem_cache *fuse_inode_cachep;
 struct list_head fuse_conn_list;
 DEFINE_MUTEX(fuse_mutex);
 
-static int set_global_limit(const char *val, struct kernel_param *kp);
+static int set_global_limit(const char *val, const struct kernel_param *kp);
 
 unsigned max_user_bgreq;
 module_param_call(max_user_bgreq, set_global_limit, param_get_uint,
@@ -823,14 +823,14 @@ static const struct super_operations fuse_super_operations = {
 static void sanitize_global_limit(unsigned *limit)
 {
 	if (*limit == 0)
-		*limit = ((totalram_pages << PAGE_SHIFT) >> 13) /
+		*limit = ((totalram_pages() << PAGE_SHIFT) >> 13) /
 			 sizeof(struct fuse_req);
 
 	if (*limit >= 1 << 16)
 		*limit = (1 << 16) - 1;
 }
 
-static int set_global_limit(const char *val, struct kernel_param *kp)
+static int set_global_limit(const char *val, const struct kernel_param *kp)
 {
 	int rv;
 
@@ -918,6 +918,12 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->parallel_dirops = 1;
 			if (arg->flags & FUSE_HANDLE_KILLPRIV)
 				fc->handle_killpriv = 1;
+			if (arg->flags & FUSE_PASSTHROUGH) {
+				fc->passthrough = 1;
+				/* Prevent further stacking */
+				fc->sb->s_stack_depth =
+					FILESYSTEM_MAX_STACK_DEPTH;
+			}
 			if (arg->time_gran && arg->time_gran <= 1000000000)
 				fc->sb->s_time_gran = arg->time_gran;
 			if ((arg->flags & FUSE_POSIX_ACL)) {

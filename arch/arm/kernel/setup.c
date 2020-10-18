@@ -113,6 +113,15 @@ unsigned int elf_hwcap2 __read_mostly;
 EXPORT_SYMBOL(elf_hwcap2);
 
 
+char* (*arch_read_hardware_id)(void);
+EXPORT_SYMBOL(arch_read_hardware_id);
+
+unsigned int boot_reason;
+EXPORT_SYMBOL(boot_reason);
+
+unsigned int cold_boot;
+EXPORT_SYMBOL(cold_boot);
+
 #ifdef MULTI_CPU
 struct processor processor __ro_after_init;
 #if defined(CONFIG_BIG_LITTLE) && defined(CONFIG_HARDEN_BRANCH_PREDICTOR)
@@ -238,6 +247,40 @@ static const char *proc_arch[] = {
 	"?(16)",
 	"?(17)",
 };
+
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+struct arm_btbinv {
+	void (*apply_bp_hardening)(void);
+};
+static DEFINE_PER_CPU_READ_MOSTLY(struct arm_btbinv, arm_btbinv);
+
+static void arm_a73_apply_bp_hardening(void)
+{
+	asm("mov        r2, #0");
+	asm("mcr        p15, 0, r2, c7, c5, 6");
+}
+
+void arm_apply_bp_hardening(void)
+{
+	if (this_cpu_ptr(&arm_btbinv)->apply_bp_hardening)
+		this_cpu_ptr(&arm_btbinv)->apply_bp_hardening();
+}
+
+void arm_init_bp_hardening(void)
+{
+	switch (read_cpuid_part()) {
+	case ARM_CPU_PART_CORTEX_A73:
+	case ARM_CPU_PART_KRYO2XX_GOLD:
+		per_cpu(arm_btbinv.apply_bp_hardening, raw_smp_processor_id())
+			  = arm_a73_apply_bp_hardening;
+		break;
+	default:
+		per_cpu(arm_btbinv.apply_bp_hardening, raw_smp_processor_id())
+			  = NULL;
+		break;
+	}
+}
+#endif
 
 #ifdef CONFIG_CPU_V7M
 static int __get_cpu_architecture(void)
@@ -692,9 +735,12 @@ struct proc_info_list *lookup_processor(u32 midr)
 
 static void __init setup_processor(void)
 {
-	unsigned int midr = read_cpuid_id();
-	struct proc_info_list *list = lookup_processor(midr);
+	unsigned int midr;
+	struct proc_info_list *list;
 
+	arm_init_bp_hardening();
+	midr = read_cpuid_id();
+	list = lookup_processor(midr);
 	cpu_name = list->cpu_name;
 	__cpu_architecture = __get_cpu_architecture();
 
@@ -1068,6 +1114,8 @@ void __init hyp_mode_check(void)
 #endif
 }
 
+void __init __weak init_random_pool(void) { }
+
 void __init setup_arch(char **cmdline_p)
 {
 	const struct machine_desc *mdesc;
@@ -1156,6 +1204,8 @@ void __init setup_arch(char **cmdline_p)
 
 	if (mdesc->init_early)
 		mdesc->init_early();
+
+	init_random_pool();
 }
 
 
@@ -1171,7 +1221,7 @@ static int __init topology_init(void)
 
 	return 0;
 }
-subsys_initcall(topology_init);
+postcore_initcall(topology_init);
 
 #ifdef CONFIG_HAVE_PROC_CPU
 static int __init proc_cpu_init(void)
@@ -1280,7 +1330,10 @@ static int c_show(struct seq_file *m, void *v)
 		seq_printf(m, "CPU revision\t: %d\n\n", cpuid & 15);
 	}
 
-	seq_printf(m, "Hardware\t: %s\n", machine_name);
+	if (!arch_read_hardware_id)
+		seq_printf(m, "Hardware\t: %s\n", machine_name);
+	else
+		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %s\n", system_serial);
 

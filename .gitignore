@@ -39,6 +39,7 @@ Module.symvers
 *.dwo
 *.su
 *.c.[012]*.*
+*.dtbo
 
 #
 # Top-level generic files
@@ -52,6 +53,13 @@ Module.symvers
 /vmlinuz
 /System.map
 /Module.markers
+/*.img
+/*.zip
+/kernelzip
+
+# ramfs
+!/ramdisk/**
+!/recovery/**
 
 #
 # Debian directory (make deb-pkg)
@@ -115,3 +123,11 @@ all.config
 
 # Kdevelop4
 *.kdev4
+
+# fetched Android config fragments
+kernel/configs/android-*.cfg
+
+#
+#Ignoring Android.bp link file
+#
+Android.bp

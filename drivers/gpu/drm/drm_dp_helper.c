@@ -144,6 +144,8 @@ u8 drm_dp_link_rate_to_bw_code(int link_rate)
 		return DP_LINK_BW_2_7;
 	case 540000:
 		return DP_LINK_BW_5_4;
+	case 810000:
+		return DP_LINK_BW_8_1;
 	}
 }
 EXPORT_SYMBOL(drm_dp_link_rate_to_bw_code);
@@ -158,6 +160,8 @@ int drm_dp_bw_code_to_link_rate(u8 link_bw)
 		return 270000;
 	case DP_LINK_BW_5_4:
 		return 540000;
+	case DP_LINK_BW_8_1:
+		return 810000;
 	}
 }
 EXPORT_SYMBOL(drm_dp_bw_code_to_link_rate);
@@ -354,19 +358,12 @@ EXPORT_SYMBOL(drm_dp_link_probe);
  */
 int drm_dp_link_power_up(struct drm_dp_aux *aux, struct drm_dp_link *link)
 {
-	u8 value;
+	u8 value = DP_SET_POWER_D0;
 	int err;
 
 	/* DP_SET_POWER register is only available on DPCD v1.1 and later */
 	if (link->revision < 0x11)
 		return 0;
-
-	err = drm_dp_dpcd_readb(aux, DP_SET_POWER, &value);
-	if (err < 0)
-		return err;
-
-	value &= ~DP_SET_POWER_MASK;
-	value |= DP_SET_POWER_D0;
 
 	err = drm_dp_dpcd_writeb(aux, DP_SET_POWER, value);
 	if (err < 0)
@@ -993,6 +990,7 @@ static const struct i2c_lock_operations drm_dp_i2c_lock_ops = {
 void drm_dp_aux_init(struct drm_dp_aux *aux)
 {
 	mutex_init(&aux->hw_mutex);
+	mutex_init(&aux->cec.lock);
 
 	aux->ddc.algo = &drm_dp_i2c_algo;
 	aux->ddc.algo_data = aux;
@@ -1082,3 +1080,38 @@ int drm_dp_psr_setup_time(const u8 psr_cap[EDP_PSR_RECEIVER_CAP_SIZE])
 EXPORT_SYMBOL(drm_dp_psr_setup_time);
 
 #undef PSR_SETUP_TIME
+
+/**
+ * drm_dp_read_desc - read sink/branch descriptor from DPCD
+ * @aux: DisplayPort AUX channel
+ * @desc: Device decriptor to fill from DPCD
+ * @is_branch: true for branch devices, false for sink devices
+ *
+ * Read DPCD 0x400 (sink) or 0x500 (branch) into @desc. Also debug log the
+ * identification.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int drm_dp_read_desc(struct drm_dp_aux *aux, struct drm_dp_desc *desc,
+		     bool is_branch)
+{
+	struct drm_dp_dpcd_ident *ident = &desc->ident;
+	unsigned int offset = is_branch ? DP_BRANCH_OUI : DP_SINK_OUI;
+	int ret, dev_id_len;
+
+	ret = drm_dp_dpcd_read(aux, offset, ident, sizeof(*ident));
+	if (ret < 0)
+		return ret;
+
+	dev_id_len = strnlen(ident->device_id, sizeof(ident->device_id));
+
+	DRM_DEBUG_KMS("DP %s: OUI %*phD dev-ID %*pE HW-rev %d.%d SW-rev %d.%d\n",
+		      is_branch ? "branch" : "sink",
+		      (int)sizeof(ident->oui), ident->oui,
+		      dev_id_len, ident->device_id,
+		      ident->hw_rev >> 4, ident->hw_rev & 0xf,
+		      ident->sw_major_rev, ident->sw_minor_rev);
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_dp_read_desc);

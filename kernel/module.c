@@ -62,6 +62,26 @@
 #include <linux/bsearch.h>
 #include <linux/dynamic_debug.h>
 #include <uapi/linux/module.h>
+
+#ifndef CONFIG_MODULES
+SYSCALL_DEFINE2(delete_module, const char __user *, name_user,
+		unsigned int, flags)
+{
+	return 0;
+}
+
+SYSCALL_DEFINE3(init_module, void __user *, umod,
+		unsigned long, len, const char __user *, uargs)
+{
+	return 0;
+}
+
+SYSCALL_DEFINE3(finit_module, int, fd, const char __user *, uargs, int, flags)
+{
+	return 0;
+}
+#else
+
 #include "module-internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -2101,6 +2121,8 @@ void __weak module_arch_freeing_init(struct module *mod)
 {
 }
 
+static void cfi_cleanup(struct module *mod);
+
 /* Free a module, remove from lists, etc. */
 static void free_module(struct module *mod)
 {
@@ -2142,6 +2164,10 @@ static void free_module(struct module *mod)
 
 	/* This may be empty, but that's OK */
 	disable_ro_nx(&mod->init_layout);
+
+	/* Clean up CFI for the module. */
+	cfi_cleanup(mod);
+
 	module_arch_freeing_init(mod);
 	module_memfree(mod->init_layout.base);
 	kfree(mod->args);
@@ -2152,6 +2178,11 @@ static void free_module(struct module *mod)
 
 	/* Finally, free the core (containing the module structure) */
 	disable_ro_nx(&mod->core_layout);
+#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
+	pr_info("Unloaded %s: module core layout address range: 0x%lx-0x%lx\n",
+		mod->name, (long)mod->core_layout.base,
+		(long)(mod->core_layout.base + mod->core_layout.size - 1));
+#endif
 	module_memfree(mod->core_layout.base);
 
 #ifdef CONFIG_MPU
@@ -2858,7 +2889,7 @@ static int copy_module_from_user(const void __user *umod, unsigned long len,
 
 	/* Suck in entire file: we'll want most of it. */
 	info->hdr = __vmalloc(info->len,
-			GFP_KERNEL | __GFP_HIGHMEM | __GFP_NOWARN, PAGE_KERNEL);
+			GFP_KERNEL | __GFP_NOWARN, PAGE_KERNEL);
 	if (!info->hdr)
 		return -ENOMEM;
 
@@ -3323,6 +3354,8 @@ int __weak module_finalize(const Elf_Ehdr *hdr,
 	return 0;
 }
 
+static void cfi_init(struct module *mod);
+
 static int post_relocation(struct module *mod, const struct load_info *info)
 {
 	/* Sort exception table now relocations are done. */
@@ -3334,6 +3367,9 @@ static int post_relocation(struct module *mod, const struct load_info *info)
 
 	/* Setup kallsyms-specific fields. */
 	add_kallsyms(mod, info);
+
+	/* Setup CFI for the module. */
+	cfi_init(mod);
 
 	/* Arch-specific module finalizing. */
 	return module_finalize(info->hdr, info->sechdrs, mod);
@@ -3459,6 +3495,14 @@ static noinline int do_init_module(struct module *mod)
 	mod_tree_remove_init(mod);
 	disable_ro_nx(&mod->init_layout);
 	module_arch_freeing_init(mod);
+#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
+	pr_info("Loaded %s: module init layout addresses range: 0x%lx-0x%lx\n",
+		mod->name, (long)mod->init_layout.base,
+		(long)(mod->init_layout.base + mod->init_layout.size - 1));
+	pr_info("%s: core layout addresses range: 0x%lx-0x%lx\n", mod->name,
+		(long)mod->core_layout.base,
+		(long)(mod->core_layout.base + mod->core_layout.size - 1));
+#endif
 	mod->init_layout.base = NULL;
 	mod->init_layout.size = 0;
 	mod->init_layout.ro_size = 0;
@@ -4071,6 +4115,22 @@ int module_kallsyms_on_each_symbol(int (*fn)(void *, const char *,
 }
 #endif /* CONFIG_KALLSYMS */
 
+static void cfi_init(struct module *mod)
+{
+#ifdef CONFIG_CFI_CLANG
+	mod->cfi_check =
+		(cfi_check_fn)mod_find_symname(mod, CFI_CHECK_FN_NAME);
+	cfi_module_add(mod, module_addr_min, module_addr_max);
+#endif
+}
+
+static void cfi_cleanup(struct module *mod)
+{
+#ifdef CONFIG_CFI_CLANG
+	cfi_module_remove(mod, module_addr_min, module_addr_max);
+#endif
+}
+
 static char *module_flags(struct module *mod, char *buf)
 {
 	int bx = 0;
@@ -4314,3 +4374,5 @@ void module_layout(struct module *mod,
 }
 EXPORT_SYMBOL(module_layout);
 #endif
+
+#endif // CONFIG_MODULES

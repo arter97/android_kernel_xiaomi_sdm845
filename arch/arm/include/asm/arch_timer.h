@@ -92,7 +92,14 @@ static inline u64 arch_counter_get_cntvct(void)
 	u64 cval;
 
 	isb();
+#if IS_ENABLED(CONFIG_MSM_TIMER_LEAP)
+#define L32_BITS	0x00000000FFFFFFFF
+	do {
+		asm volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r" (cval));
+	} while ((cval & L32_BITS) == L32_BITS);
+#else
 	asm volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r" (cval));
+#endif
 	return cval;
 }
 
@@ -106,6 +113,7 @@ static inline u32 arch_timer_get_cntkctl(void)
 static inline void arch_timer_set_cntkctl(u32 cntkctl)
 {
 	asm volatile("mcr p15, 0, %0, c14, c1, 0" : : "r" (cntkctl));
+	isb();
 }
 
 #endif

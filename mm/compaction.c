@@ -20,6 +20,11 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/page_owner.h>
+#include <linux/psi.h>
+#include <linux/msm_drm_notify.h>
+#include <linux/moduleparam.h>
+#include <linux/time.h>
+#include <linux/workqueue.h>
 #include "internal.h"
 
 #ifdef CONFIG_COMPACTION
@@ -635,18 +640,50 @@ isolate_freepages_range(struct compact_control *cc,
 }
 
 /* Similar to reclaim, but different enough that they don't share logic */
-static bool too_many_isolated(struct zone *zone)
+static bool __too_many_isolated(struct zone *zone, int safe)
 {
 	unsigned long active, inactive, isolated;
 
-	inactive = node_page_state(zone->zone_pgdat, NR_INACTIVE_FILE) +
+	if (safe) {
+		inactive = node_page_state_snapshot(zone->zone_pgdat,
+			NR_INACTIVE_FILE) +
+			node_page_state_snapshot(zone->zone_pgdat,
+			NR_INACTIVE_ANON);
+		active = node_page_state_snapshot(zone->zone_pgdat,
+			NR_ACTIVE_FILE) +
+			node_page_state_snapshot(zone->zone_pgdat,
+			NR_ACTIVE_ANON);
+		isolated = node_page_state_snapshot(zone->zone_pgdat,
+			NR_ISOLATED_FILE) +
+			node_page_state_snapshot(zone->zone_pgdat,
+			NR_ISOLATED_ANON);
+	} else {
+		inactive = node_page_state(zone->zone_pgdat, NR_INACTIVE_FILE) +
 			node_page_state(zone->zone_pgdat, NR_INACTIVE_ANON);
-	active = node_page_state(zone->zone_pgdat, NR_ACTIVE_FILE) +
+		active = node_page_state(zone->zone_pgdat, NR_ACTIVE_FILE) +
 			node_page_state(zone->zone_pgdat, NR_ACTIVE_ANON);
-	isolated = node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE) +
+		isolated = node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE) +
 			node_page_state(zone->zone_pgdat, NR_ISOLATED_ANON);
+	}
 
 	return isolated > (inactive + active) / 2;
+}
+
+/* Similar to reclaim, but different enough that they don't share logic */
+static bool too_many_isolated(struct compact_control *cc)
+{
+	/*
+	 * __too_many_isolated(safe=0) is fast but inaccurate, because it
+	 * doesn't account for the vm_stat_diff[] counters.  So if it looks
+	 * like too_many_isolated() is about to return true, fall back to the
+	 * slower, more accurate zone_page_state_snapshot().
+	 */
+	if (unlikely(__too_many_isolated(cc->zone, 0))) {
+		if (cc->mode != MIGRATE_ASYNC)
+			return __too_many_isolated(cc->zone, 1);
+	}
+
+	return false;
 }
 
 /**
@@ -686,7 +723,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 	 * list by either parallel reclaimers or compaction. If there are,
 	 * delay for some time until fewer pages are isolated
 	 */
-	while (unlikely(too_many_isolated(zone))) {
+	while (unlikely(too_many_isolated(cc))) {
 		/* async migration should just abort */
 		if (cc->mode == MIGRATE_ASYNC)
 			return 0;
@@ -816,6 +853,13 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 */
 		if (!page_mapping(page) &&
 		    page_count(page) > page_mapcount(page))
+			goto isolate_fail;
+
+		/*
+		 * Only allow to migrate anonymous pages in GFP_NOFS context
+		 * because those do not depend on fs locks.
+		 */
+		if (!(cc->gfp_mask & __GFP_FS) && page_mapping(page))
 			goto isolate_fail;
 
 		/* If we already hold the lock, we can skip some rechecking */
@@ -1677,14 +1721,16 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
 		enum compact_priority prio)
 {
-	int may_enter_fs = gfp_mask & __GFP_FS;
 	int may_perform_io = gfp_mask & __GFP_IO;
 	struct zoneref *z;
 	struct zone *zone;
 	enum compact_result rc = COMPACT_SKIPPED;
 
-	/* Check if the GFP flags allow compaction */
-	if (!may_enter_fs || !may_perform_io)
+	/*
+	 * Check if the GFP flags allow compaction - GFP_NOIO is really
+	 * tricky context because the migration might require IO
+	 */
+	if (!may_perform_io)
 		return COMPACT_SKIPPED;
 
 	trace_mm_compaction_try_to_compact_pages(order, gfp_mask, prio);
@@ -1739,6 +1785,53 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	return rc;
 }
 
+static struct workqueue_struct *compaction_wq;
+static struct delayed_work compaction_work;
+static bool screen_on = true;
+static int compaction_timeout_ms = 900000;
+module_param_named(compaction_forced_timeout_ms, compaction_timeout_ms, int,
+			0644);
+static int compaction_soff_delay_ms = 3000;
+module_param_named(compaction_screen_off_delay_ms, compaction_soff_delay_ms, int,
+			0644);
+static unsigned long compaction_forced_timeout;
+
+
+static int msm_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
+{
+	struct msm_drm_notifier *evdata = data;
+	int *blank;
+
+	if (event != MSM_DRM_EVENT_BLANK)
+		return 0;
+
+	if (evdata->id != MSM_DRM_PRIMARY_DISPLAY)
+		return 0;
+
+	if (evdata && evdata->data) {
+		blank = evdata->data;
+
+		switch (*blank) {
+		case MSM_DRM_BLANK_POWERDOWN:
+			screen_on = false;
+			if (time_after(jiffies, compaction_forced_timeout) && !delayed_work_busy(&compaction_work)) {
+				compaction_forced_timeout = jiffies + msecs_to_jiffies(compaction_timeout_ms);
+				queue_delayed_work(compaction_wq, &compaction_work,
+					msecs_to_jiffies(compaction_soff_delay_ms));
+			}
+		break;
+		case MSM_DRM_BLANK_UNBLANK:
+			screen_on = true;
+		break;
+		}
+	}
+
+	return 0;
+}
+
+static struct notifier_block compaction_notifier_block = {
+	.notifier_call = msm_drm_notifier_callback,
+};
 
 /* Compact all zones within a node */
 static void compact_node(int nid)
@@ -1751,6 +1844,7 @@ static void compact_node(int nid)
 		.mode = MIGRATE_SYNC,
 		.ignore_skip_hint = true,
 		.whole_zone = true,
+		.gfp_mask = GFP_KERNEL,
 	};
 
 
@@ -1773,6 +1867,11 @@ static void compact_node(int nid)
 	}
 }
 
+#ifdef CONFIG_ZSWAP
+extern void zswap_compact(void);
+#else
+static inline void zswap_compact(void) {}
+#endif
 /* Compact all nodes in the system */
 static void compact_nodes(void)
 {
@@ -1783,6 +1882,25 @@ static void compact_nodes(void)
 
 	for_each_online_node(nid)
 		compact_node(nid);
+
+	zswap_compact();
+}
+
+static void do_compaction(struct work_struct *work)
+{
+	/* Return early if the screen is on */
+	if (screen_on)
+		return;
+
+	pr_info("Scheduled memory compaction is starting\n");
+
+	/* Do full compaction */
+	compact_nodes();
+
+	/* Force compaction timeout */
+	compaction_forced_timeout = jiffies + msecs_to_jiffies(compaction_timeout_ms);
+
+	pr_info("Scheduled memory compaction is completed\n");
 }
 
 /* The written value is actually unused, all memory is compacted */
@@ -1876,6 +1994,7 @@ static void kcompactd_do_work(pg_data_t *pgdat)
 		.classzone_idx = pgdat->kcompactd_classzone_idx,
 		.mode = MIGRATE_SYNC_LIGHT,
 		.ignore_skip_hint = true,
+		.gfp_mask = GFP_KERNEL,
 
 	};
 	trace_mm_compaction_kcompactd_wake(pgdat->node_id, cc.order,
@@ -1973,11 +2092,15 @@ static int kcompactd(void *p)
 	pgdat->kcompactd_classzone_idx = pgdat->nr_zones - 1;
 
 	while (!kthread_should_stop()) {
+		unsigned long pflags;
+
 		trace_mm_compaction_kcompactd_sleep(pgdat->node_id);
 		wait_event_freezable(pgdat->kcompactd_wait,
 				kcompactd_work_requested(pgdat));
 
+		psi_memstall_enter(&pflags);
 		kcompactd_do_work(pgdat);
+		psi_memstall_leave(&pflags);
 	}
 
 	return 0;
@@ -2024,35 +2147,55 @@ void kcompactd_stop(int nid)
  * away, we get changed to run anywhere: as the first one comes back,
  * restore their cpu bindings.
  */
-static int cpu_callback(struct notifier_block *nfb, unsigned long action,
-			void *hcpu)
+static int kcompactd_cpu_online(unsigned int cpu)
 {
 	int nid;
 
-	if (action == CPU_ONLINE || action == CPU_ONLINE_FROZEN) {
-		for_each_node_state(nid, N_MEMORY) {
-			pg_data_t *pgdat = NODE_DATA(nid);
-			const struct cpumask *mask;
+	for_each_node_state(nid, N_MEMORY) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+		const struct cpumask *mask;
 
-			mask = cpumask_of_node(pgdat->node_id);
+		mask = cpumask_of_node(pgdat->node_id);
 
-			if (cpumask_any_and(cpu_online_mask, mask) < nr_cpu_ids)
-				/* One of our CPUs online: restore mask */
-				set_cpus_allowed_ptr(pgdat->kcompactd, mask);
-		}
+		if (cpumask_any_and(cpu_online_mask, mask) < nr_cpu_ids)
+			/* One of our CPUs online: restore mask */
+			set_cpus_allowed_ptr(pgdat->kcompactd, mask);
 	}
-	return NOTIFY_OK;
+	return 0;
 }
 
 static int __init kcompactd_init(void)
 {
 	int nid;
+	int ret;
+
+	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+					"mm/compaction:online",
+					kcompactd_cpu_online, NULL);
+	if (ret < 0) {
+		pr_err("kcompactd: failed to register hotplug callbacks.\n");
+		return ret;
+	}
 
 	for_each_node_state(nid, N_MEMORY)
 		kcompactd_run(nid);
-	hotcpu_notifier(cpu_callback, 0);
 	return 0;
 }
 subsys_initcall(kcompactd_init)
+
+static int  __init scheduled_compaction_init(void)
+{
+	compaction_wq = create_freezable_workqueue("compaction_wq");
+
+	if (!compaction_wq)
+		return -EFAULT;
+
+	INIT_DELAYED_WORK(&compaction_work, do_compaction);
+
+	msm_drm_register_client(&compaction_notifier_block);
+
+	return 0;
+}
+late_initcall(scheduled_compaction_init);
 
 #endif /* CONFIG_COMPACTION */

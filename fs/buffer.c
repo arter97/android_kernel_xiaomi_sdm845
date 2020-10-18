@@ -625,7 +625,7 @@ EXPORT_SYMBOL(mark_buffer_dirty_inode);
  *
  * The caller must hold lock_page_memcg().
  */
-static void __set_page_dirty(struct page *page, struct address_space *mapping,
+void __set_page_dirty(struct page *page, struct address_space *mapping,
 			     int warn)
 {
 	unsigned long flags;
@@ -639,6 +639,7 @@ static void __set_page_dirty(struct page *page, struct address_space *mapping,
 	}
 	spin_unlock_irqrestore(&mapping->tree_lock, flags);
 }
+EXPORT_SYMBOL_GPL(__set_page_dirty);
 
 /*
  * Add a page to the dirty page list.
@@ -1456,11 +1457,47 @@ static bool has_bh_in_lru(int cpu, void *dummy)
 	return 0;
 }
 
+static void __evict_bh_lru(void *arg)
+{
+	struct bh_lru *b = &get_cpu_var(bh_lrus);
+	struct buffer_head *bh = arg;
+	int i;
+
+	for (i = 0; i < BH_LRU_SIZE; i++) {
+		if (b->bhs[i] == bh) {
+			brelse(b->bhs[i]);
+			b->bhs[i] = NULL;
+			goto out;
+		}
+	}
+out:
+	put_cpu_var(bh_lrus);
+}
+
+static bool bh_exists_in_lru(int cpu, void *arg)
+{
+	struct bh_lru *b = per_cpu_ptr(&bh_lrus, cpu);
+	struct buffer_head *bh = arg;
+	int i;
+
+	for (i = 0; i < BH_LRU_SIZE; i++) {
+		if (b->bhs[i] == bh)
+			return 1;
+	}
+
+	return 0;
+
+}
 void invalidate_bh_lrus(void)
 {
 	on_each_cpu_cond(has_bh_in_lru, invalidate_bh_lru, NULL, 1, GFP_KERNEL);
 }
 EXPORT_SYMBOL_GPL(invalidate_bh_lrus);
+
+static void evict_bh_lrus(struct buffer_head *bh)
+{
+	on_each_cpu_cond(bh_exists_in_lru, __evict_bh_lru, bh, 1, GFP_ATOMIC);
+}
 
 void set_bh_page(struct buffer_head *bh,
 		struct page *page, unsigned long offset)
@@ -3267,8 +3304,15 @@ drop_buffers(struct page *page, struct buffer_head **buffers_to_free)
 	do {
 		if (buffer_write_io_error(bh) && page->mapping)
 			mapping_set_error(page->mapping, -EIO);
-		if (buffer_busy(bh))
-			goto failed;
+		if (buffer_busy(bh)) {
+			/*
+			 * Check if the busy failure was due to an
+			 * outstanding LRU reference
+			 */
+			evict_bh_lrus(bh);
+			if (buffer_busy(bh))
+				goto failed;
+		}
 		bh = bh->b_this_page;
 	} while (bh != head);
 
@@ -3420,7 +3464,7 @@ void free_buffer_head(struct buffer_head *bh)
 }
 EXPORT_SYMBOL(free_buffer_head);
 
-static void buffer_exit_cpu(int cpu)
+static int buffer_exit_cpu_dead(unsigned int cpu)
 {
 	int i;
 	struct bh_lru *b = &per_cpu(bh_lrus, cpu);
@@ -3431,14 +3475,7 @@ static void buffer_exit_cpu(int cpu)
 	}
 	this_cpu_add(bh_accounting.nr, per_cpu(bh_accounting, cpu).nr);
 	per_cpu(bh_accounting, cpu).nr = 0;
-}
-
-static int buffer_cpu_notify(struct notifier_block *self,
-			      unsigned long action, void *hcpu)
-{
-	if (action == CPU_DEAD || action == CPU_DEAD_FROZEN)
-		buffer_exit_cpu((unsigned long)hcpu);
-	return NOTIFY_OK;
+	return 0;
 }
 
 /**
@@ -3488,6 +3525,7 @@ EXPORT_SYMBOL(bh_submit_read);
 void __init buffer_init(void)
 {
 	unsigned long nrpages;
+	int ret;
 
 	bh_cachep = kmem_cache_create("buffer_head",
 			sizeof(struct buffer_head), 0,
@@ -3500,5 +3538,7 @@ void __init buffer_init(void)
 	 */
 	nrpages = (nr_free_buffer_pages() * 10) / 100;
 	max_buffer_heads = nrpages * (PAGE_SIZE / sizeof(struct buffer_head));
-	hotcpu_notifier(buffer_cpu_notify, 0);
+	ret = cpuhp_setup_state_nocalls(CPUHP_FS_BUFF_DEAD, "fs/buffer:dead",
+					NULL, buffer_exit_cpu_dead);
+	WARN_ON(ret < 0);
 }

@@ -56,14 +56,10 @@ single-used-m := $(sort $(filter-out $(multi-used-m),$(obj-m)))
 # objects depend on those (obviously)
 multi-objs-y := $(foreach m, $(multi-used-y), $($(m:.o=-objs)) $($(m:.o=-y)))
 multi-objs-m := $(foreach m, $(multi-used-m), $($(m:.o=-objs)) $($(m:.o=-y)))
-multi-objs   := $(multi-objs-y) $(multi-objs-m)
 
 # $(subdir-obj-y) is the list of objects in $(obj-y) which uses dir/ to
 # tell kbuild to descend
 subdir-obj-y := $(filter %/built-in.o, $(obj-y))
-
-# $(obj-dirs) is a list of directories that contain object files
-obj-dirs := $(dir $(multi-objs) $(obj-y))
 
 # Replace multi-part objects by their individual parts, look at local dir only
 real-objs-y := $(foreach m, $(filter-out $(subdir-obj-y), $(obj-y)), $(if $(strip $($(m:.o=-objs)) $($(m:.o=-y))),$($(m:.o=-objs)) $($(m:.o=-y)),$(m))) $(extra-y)
@@ -87,7 +83,6 @@ multi-used-m	:= $(addprefix $(obj)/,$(multi-used-m))
 multi-objs-y	:= $(addprefix $(obj)/,$(multi-objs-y))
 multi-objs-m	:= $(addprefix $(obj)/,$(multi-objs-m))
 subdir-ym	:= $(addprefix $(obj)/,$(subdir-ym))
-obj-dirs	:= $(addprefix $(obj)/,$(obj-dirs))
 
 # These flags are needed for modversions and compiling, so we define them here
 # already
@@ -271,12 +266,12 @@ cmd_objcopy = $(OBJCOPY) $(OBJCOPYFLAGS) $(OBJCOPYFLAGS_$(@F)) $< $@
 # ---------------------------------------------------------------------------
 
 quiet_cmd_gzip = GZIP    $@
-cmd_gzip = (cat $(filter-out FORCE,$^) | gzip -n -f -9 > $@) || \
+cmd_gzip = (cat $(filter-out FORCE,$^) | pigz -n -R -f -9 > $@) || \
 	(rm -f $@ ; false)
 
 # DTC
 # ---------------------------------------------------------------------------
-DTC ?= $(objtree)/scripts/dtc/dtc
+DTC ?= dtc
 
 # Disable noisy checks by default
 ifeq ($(KBUILD_ENABLE_EXTRA_GCC_CHECKS),)
@@ -301,6 +296,12 @@ cmd_dt_S_dtb=						\
 $(obj)/%.dtb.S: $(obj)/%.dtb
 	$(call cmd,dt_S_dtb)
 
+ifneq ($(DTC_EXT),)
+DTC = $(DTC_EXT)
+else
+DTC = $(objtree)/scripts/dtc/dtc
+endif
+
 quiet_cmd_dtc = DTC     $@
 cmd_dtc = mkdir -p $(dir ${dtc-tmp}) ; \
 	$(CPP) $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $< ; \
@@ -314,30 +315,36 @@ $(obj)/%.dtb: $(src)/%.dts FORCE
 
 dtc-tmp = $(subst $(comma),_,$(dot-target).dts.tmp)
 
+# cat
+# ---------------------------------------------------------------------------
+# Concatentate multiple files together
+quiet_cmd_cat = CAT     $@
+cmd_cat = (cat $(filter-out FORCE,$^) > $@) || (rm -f $@; false)
+
 # Bzip2
 # ---------------------------------------------------------------------------
 
 # Bzip2 and LZMA do not include size in file... so we have to fake that;
 # append the size as a 32-bit littleendian number as gzip does.
-size_append = printf $(shell						\
-dec_size=0;								\
-for F in $1; do								\
-	fsize=$$(stat -c "%s" $$F);					\
-	dec_size=$$(expr $$dec_size + $$fsize);				\
-done;									\
-printf "%08x\n" $$dec_size |						\
-	sed 's/\(..\)/\1 /g' | {					\
-		read ch0 ch1 ch2 ch3;					\
-		for ch in $$ch3 $$ch2 $$ch1 $$ch0; do			\
-			printf '%s%03o' '\\' $$((0x$$ch)); 		\
-		done;							\
-	}								\
-)
+# size_append = printf $(shell						\
+# dec_size=0;								\
+# for F in $1; do								\
+# 	fsize=$$(stat -c "%s" $$F);					\
+# 	dec_size=$$(expr $$dec_size + $$fsize);				\
+# done;									\
+# printf "%08x\n" $$dec_size |						\
+# 	sed 's/\(..\)/\1 /g' | {					\
+# 		read ch0 ch1 ch2 ch3;					\
+# 		for ch in $$ch3 $$ch2 $$ch1 $$ch0; do			\
+# 			printf '%s%03o' '\\' $$((0x$$ch)); 		\
+# 		done;							\
+# 	}								\
+# )
 
-quiet_cmd_bzip2 = BZIP2   $@
-cmd_bzip2 = (cat $(filter-out FORCE,$^) | \
-	bzip2 -9 && $(call size_append, $(filter-out FORCE,$^))) > $@ || \
-	(rm -f $@ ; false)
+# quiet_cmd_bzip2 = BZIP2   $@
+# cmd_bzip2 = (cat $(filter-out FORCE,$^) | \
+# 	bzip2 -9 && $(call size_append, $(filter-out FORCE,$^))) > $@ || \
+# 	(rm -f $@ ; false)
 
 # Lzma
 # ---------------------------------------------------------------------------

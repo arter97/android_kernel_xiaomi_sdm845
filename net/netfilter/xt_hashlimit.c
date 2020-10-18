@@ -253,9 +253,9 @@ static int htable_create(struct net *net, struct hashlimit_cfg2 *cfg,
 	if (cfg->size) {
 		size = cfg->size;
 	} else {
-		size = (totalram_pages << PAGE_SHIFT) / 16384 /
+		size = (totalram_pages() << PAGE_SHIFT) / 16384 /
 		       sizeof(struct list_head);
-		if (totalram_pages > 1024 * 1024 * 1024 / PAGE_SIZE)
+		if (totalram_pages() > 1024 * 1024 * 1024 / PAGE_SIZE)
 			size = 8192;
 		if (size < 16)
 			size = 16;
@@ -851,6 +851,7 @@ static struct xt_match hashlimit_mt_reg[] __read_mostly = {
 		.family         = NFPROTO_IPV4,
 		.match          = hashlimit_mt_v1,
 		.matchsize      = sizeof(struct xt_hashlimit_mtinfo1),
+		.usersize	= offsetof(struct xt_hashlimit_mtinfo1, hinfo),
 		.checkentry     = hashlimit_mt_check_v1,
 		.destroy        = hashlimit_mt_destroy_v1,
 		.me             = THIS_MODULE,
@@ -861,6 +862,7 @@ static struct xt_match hashlimit_mt_reg[] __read_mostly = {
 		.family         = NFPROTO_IPV4,
 		.match          = hashlimit_mt,
 		.matchsize      = sizeof(struct xt_hashlimit_mtinfo2),
+		.usersize	= offsetof(struct xt_hashlimit_mtinfo2, hinfo),
 		.checkentry     = hashlimit_mt_check,
 		.destroy        = hashlimit_mt_destroy,
 		.me             = THIS_MODULE,
@@ -872,6 +874,7 @@ static struct xt_match hashlimit_mt_reg[] __read_mostly = {
 		.family         = NFPROTO_IPV6,
 		.match          = hashlimit_mt_v1,
 		.matchsize      = sizeof(struct xt_hashlimit_mtinfo1),
+		.usersize	= offsetof(struct xt_hashlimit_mtinfo1, hinfo),
 		.checkentry     = hashlimit_mt_check_v1,
 		.destroy        = hashlimit_mt_destroy_v1,
 		.me             = THIS_MODULE,
@@ -882,6 +885,7 @@ static struct xt_match hashlimit_mt_reg[] __read_mostly = {
 		.family         = NFPROTO_IPV6,
 		.match          = hashlimit_mt,
 		.matchsize      = sizeof(struct xt_hashlimit_mtinfo2),
+		.usersize	= offsetof(struct xt_hashlimit_mtinfo2, hinfo),
 		.checkentry     = hashlimit_mt_check,
 		.destroy        = hashlimit_mt_destroy,
 		.me             = THIS_MODULE,

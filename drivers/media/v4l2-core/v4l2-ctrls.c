@@ -307,6 +307,7 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 	static const char * const header_mode[] = {
 		"Separate Buffer",
 		"Joined With 1st Frame",
+		"Joined with I Frame",
 		NULL,
 	};
 	static const char * const multi_slice[] = {
@@ -337,6 +338,8 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 		"4.2",
 		"5",
 		"5.1",
+		"5.2",
+		"Unknown",
 		NULL,
 	};
 	static const char * const h264_loop_filter[] = {
@@ -363,6 +366,7 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 		"Scalable High Intra",
 		"Stereo High",
 		"Multiview High",
+		"Constrained High",
 		NULL,
 	};
 	static const char * const vui_sar_idc[] = {

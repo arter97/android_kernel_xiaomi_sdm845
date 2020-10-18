@@ -72,14 +72,23 @@ ip6_packet_match(const struct sk_buff *skb,
 {
 	unsigned long ret;
 	const struct ipv6hdr *ipv6 = ipv6_hdr(skb);
+#if IS_ENABLED(IP6_NF_IPTABLES_128)
+	const __uint128_t *ulm1 = (const __uint128_t *)&ip6info->smsk;
+	const __uint128_t *ulm2 = (const __uint128_t *)&ip6info->dmsk;
+#endif
 
-	if (NF_INVF(ip6info, IP6T_INV_SRCIP,
-		    ipv6_masked_addr_cmp(&ipv6->saddr, &ip6info->smsk,
-					 &ip6info->src)) ||
-	    NF_INVF(ip6info, IP6T_INV_DSTIP,
-		    ipv6_masked_addr_cmp(&ipv6->daddr, &ip6info->dmsk,
-					 &ip6info->dst)))
-		return false;
+#if IS_ENABLED(IP6_NF_IPTABLES_128)
+	if (*ulm1 || *ulm2)
+#endif
+	{
+		if (NF_INVF(ip6info, IP6T_INV_SRCIP,
+			    ipv6_masked_addr_cmp(&ipv6->saddr, &ip6info->smsk,
+						 &ip6info->src)) ||
+		    NF_INVF(ip6info, IP6T_INV_DSTIP,
+			    ipv6_masked_addr_cmp(&ipv6->daddr, &ip6info->dmsk,
+						 &ip6info->dst)))
+			return false;
+	}
 
 	ret = ifname_compare_aligned(indev, ip6info->iniface, ip6info->iniface_mask);
 
@@ -864,10 +873,6 @@ copy_entries_to_user(unsigned int total_size,
 		return PTR_ERR(counters);
 
 	loc_cpu_entry = private->entries;
-	if (copy_to_user(userptr, loc_cpu_entry, total_size) != 0) {
-		ret = -EFAULT;
-		goto free_counters;
-	}
 
 	/* FIXME: use iterator macros --RR */
 	/* ... then go back and fix counters and names */
@@ -877,6 +882,10 @@ copy_entries_to_user(unsigned int total_size,
 		const struct xt_entry_target *t;
 
 		e = (struct ip6t_entry *)(loc_cpu_entry + off);
+		if (copy_to_user(userptr + off, e, sizeof(*e))) {
+			ret = -EFAULT;
+			goto free_counters;
+		}
 		if (copy_to_user(userptr + off
 				 + offsetof(struct ip6t_entry, counters),
 				 &counters[num],
@@ -890,23 +899,14 @@ copy_entries_to_user(unsigned int total_size,
 		     i += m->u.match_size) {
 			m = (void *)e + i;
 
-			if (copy_to_user(userptr + off + i
-					 + offsetof(struct xt_entry_match,
-						    u.user.name),
-					 m->u.kernel.match->name,
-					 strlen(m->u.kernel.match->name)+1)
-			    != 0) {
+			if (xt_match_to_user(m, userptr + off + i)) {
 				ret = -EFAULT;
 				goto free_counters;
 			}
 		}
 
 		t = ip6t_get_target_c(e);
-		if (copy_to_user(userptr + off + e->target_offset
-				 + offsetof(struct xt_entry_target,
-					    u.user.name),
-				 t->u.kernel.target->name,
-				 strlen(t->u.kernel.target->name)+1) != 0) {
+		if (xt_target_to_user(t, userptr + off + e->target_offset)) {
 			ret = -EFAULT;
 			goto free_counters;
 		}

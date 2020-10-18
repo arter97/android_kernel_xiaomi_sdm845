@@ -130,7 +130,7 @@ xattr_permission(struct inode *inode, const char *name, int mask)
 			return -EPERM;
 	}
 
-	return inode_permission(inode, mask);
+	return inode_permission2(ERR_PTR(-EOPNOTSUPP), inode, mask);
 }
 
 int
@@ -588,6 +588,7 @@ getxattr(struct dentry *d, const char __user *name, void __user *value,
 	ssize_t error;
 	void *kvalue = NULL;
 	char kname[XATTR_NAME_MAX + 1];
+	char kvalue_onstack[SZ_4K] __aligned(8);
 
 	error = strncpy_from_user(kname, name, sizeof(kname));
 	if (error == 0 || error == sizeof(kname))
@@ -596,13 +597,18 @@ getxattr(struct dentry *d, const char __user *name, void __user *value,
 		return error;
 
 	if (size) {
-		if (size > XATTR_SIZE_MAX)
-			size = XATTR_SIZE_MAX;
-		kvalue = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
-		if (!kvalue) {
-			kvalue = vzalloc(size);
-			if (!kvalue)
-				return -ENOMEM;
+		if (size <= ARRAY_SIZE(kvalue_onstack)) {
+			kvalue = kvalue_onstack;
+			memset(kvalue, 0, size);
+		} else {
+			if (size > XATTR_SIZE_MAX)
+				size = XATTR_SIZE_MAX;
+			kvalue = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
+			if (!kvalue) {
+				kvalue = vzalloc(size);
+				if (!kvalue)
+					return -ENOMEM;
+			}
 		}
 	}
 
@@ -619,7 +625,8 @@ getxattr(struct dentry *d, const char __user *name, void __user *value,
 		error = -E2BIG;
 	}
 
-	kvfree(kvalue);
+	if (kvalue != kvalue_onstack)
+		kvfree(kvalue);
 
 	return error;
 }

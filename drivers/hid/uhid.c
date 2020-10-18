@@ -31,6 +31,8 @@
 #define UHID_NAME	"uhid"
 #define UHID_BUFSIZE	32
 
+static DEFINE_MUTEX(uhid_open_mutex);
+
 struct uhid_device {
 	struct mutex devlock;
 	bool running;

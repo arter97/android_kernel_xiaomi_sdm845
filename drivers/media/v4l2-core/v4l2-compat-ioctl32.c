@@ -30,6 +30,13 @@
 	get_user(__assign_tmp, from) || put_user(__assign_tmp, to);	\
 })
 
+#define convert_in_user(srcptr, dstptr)					\
+({									\
+	typeof(*srcptr) val;						\
+									\
+	get_user(val, srcptr) || put_user(val, dstptr);			\
+})
+
 static long native_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	long ret = -ENOIOCTLCMD;
@@ -393,7 +400,11 @@ static int get_v4l2_plane32(struct v4l2_plane __user *up,
 
 	if (copy_in_user(up, up32, 2 * sizeof(__u32)) ||
 	    copy_in_user(&up->data_offset, &up32->data_offset,
-			 sizeof(up->data_offset)))
+			 sizeof(up->data_offset)) ||
+	    copy_in_user(up->reserved, up32->reserved,
+			 sizeof(up->reserved)) ||
+	    copy_in_user(&up->length, &up32->length,
+			 sizeof(up->length)))
 		return -EFAULT;
 
 	switch (memory) {
@@ -425,7 +436,9 @@ static int put_v4l2_plane32(struct v4l2_plane __user *up,
 
 	if (copy_in_user(up32, up, 2 * sizeof(__u32)) ||
 	    copy_in_user(&up32->data_offset, &up->data_offset,
-			 sizeof(up->data_offset)))
+			 sizeof(up->data_offset)) ||
+	    copy_in_user(up32->reserved, up->reserved,
+			 sizeof(up32->reserved)))
 		return -EFAULT;
 
 	switch (memory) {
@@ -506,6 +519,15 @@ static int get_v4l2_buffer32(struct v4l2_buffer __user *kp,
 		    assign_in_user(&kp->timestamp.tv_usec,
 				   &up->timestamp.tv_usec))
 			return -EFAULT;
+
+	if (type == V4L2_BUF_TYPE_PRIVATE) {
+		compat_long_t tmp;
+
+		if (get_user(tmp, &up->m.userptr) ||
+				put_user((unsigned long) compat_ptr(tmp),
+					&kp->m.userptr))
+			return -EFAULT;
+	}
 
 	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
 		u32 num_planes = length;
@@ -604,6 +626,10 @@ static int put_v4l2_buffer32(struct v4l2_buffer __user *kp,
 	    get_user(length, &kp->length) ||
 	    put_user(length, &up->length))
 		return -EFAULT;
+
+	if (type == V4L2_BUF_TYPE_PRIVATE)
+		if (convert_in_user(&kp->m.userptr, &up->m.userptr))
+			return -EFAULT;
 
 	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
 		u32 num_planes = length;

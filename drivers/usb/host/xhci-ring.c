@@ -70,6 +70,9 @@
 #include "xhci.h"
 #include "xhci-trace.h"
 #include "xhci-mtk.h"
+extern void kick_usbpd_vbus_sm(void);
+extern unsigned int connected_usb_idVendor;
+extern int connected_usb_idProduct;
 
 /*
  * Returns zero if the TRB isn't in this segment, otherwise it returns the DMA
@@ -262,6 +265,8 @@ void xhci_ring_cmd_db(struct xhci_hcd *xhci)
 
 static bool xhci_mod_cmd_timer(struct xhci_hcd *xhci, unsigned long delay)
 {
+	if (connected_usb_idVendor == 0x2717 && connected_usb_idProduct == 0x3801)
+		delay = msecs_to_jiffies(1000);
 	return mod_delayed_work(system_wq, &xhci->cmd_timer, delay);
 }
 
@@ -290,7 +295,7 @@ static void xhci_handle_stopped_cmd_ring(struct xhci_hcd *xhci,
 
 		i_cmd->status = COMP_CMD_STOP;
 
-		xhci_dbg(xhci, "Turn aborted command %p to no-op\n",
+		xhci_dbg(xhci, "Turn aborted command %pK to no-op\n",
 			 i_cmd->command_trb);
 		/* get cycle state from the original cmd trb */
 		cycle_state = le32_to_cpu(
@@ -324,6 +329,7 @@ static int xhci_abort_cmd_ring(struct xhci_hcd *xhci, unsigned long flags)
 {
 	u64 temp_64;
 	int ret;
+	int delay;
 
 	xhci_dbg(xhci, "Abort command ring\n");
 
@@ -334,29 +340,30 @@ static int xhci_abort_cmd_ring(struct xhci_hcd *xhci, unsigned long flags)
 			&xhci->op_regs->cmd_ring);
 
 	/* Section 4.6.1.2 of xHCI 1.0 spec says software should
-	 * time the completion od all xHCI commands, including
+	 * time the completion of all xHCI commands, including
 	 * the Command Abort operation. If software doesn't see
-	 * CRR negated in a timely manner (e.g. longer than 5
-	 * seconds), then it should assume that the there are
-	 * larger problems with the xHC and assert HCRST.
+	 * CRR negated in a timely manner, then it should assume
+	 * that the there are larger problems with the xHC and assert HCRST.
 	 */
-	ret = xhci_handshake(&xhci->op_regs->cmd_ring,
-			CMD_RING_RUNNING, 0, 5 * 1000 * 1000);
+
+	if (connected_usb_idVendor == 0x2717 && connected_usb_idProduct == 0x3801) {
+		delay = 500 * 1000;
+		pr_err("xhci_abort_cmd_ring em headset\n");
+	}
+	else {
+		delay = 5000 * 1000;
+		pr_err("xhci_abort_cmd_ring other\n");
+	}
+
+	ret = xhci_handshake_check_state(xhci, &xhci->op_regs->cmd_ring,
+			CMD_RING_RUNNING, 0, 1000 * 1000);
+
 	if (ret < 0) {
-		/* we are about to kill xhci, give it one more chance */
-		xhci_write_64(xhci, temp_64 | CMD_RING_ABORT,
-			      &xhci->op_regs->cmd_ring);
-		udelay(1000);
-		ret = xhci_handshake(&xhci->op_regs->cmd_ring,
-				     CMD_RING_RUNNING, 0, 3 * 1000 * 1000);
-		if (ret < 0) {
-			xhci_err(xhci, "Stopped the command ring failed, "
-				 "maybe the host is dead\n");
-			xhci->xhc_state |= XHCI_STATE_DYING;
-			xhci_quiesce(xhci);
-			xhci_halt(xhci);
-			return -ESHUTDOWN;
-		}
+		xhci_err(xhci,
+			 "Stop command ring failed, maybe the host is dead\n");
+		xhci->xhc_state |= XHCI_STATE_DYING;
+		xhci_halt(xhci);
+		return -ESHUTDOWN;
 	}
 	/*
 	 * Writing the CMD_RING_ABORT bit should cause a cmd completion event,
@@ -565,7 +572,7 @@ void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
 			"Cycle state = 0x%x", state->new_cycle_state);
 
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
-			"New dequeue segment = %p (virtual)",
+			"New dequeue segment = %pK (virtual)",
 			state->new_deq_seg);
 	addr = xhci_trb_virt_to_dma(state->new_deq_seg, state->new_deq_ptr);
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
@@ -600,8 +607,8 @@ static void td_to_noop(struct xhci_hcd *xhci, struct xhci_ring *ep_ring,
 			xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
 					"Cancel (unchain) link TRB");
 			xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
-					"Address = %p (0x%llx dma); "
-					"in seg %p (0x%llx dma)",
+					"Address = %pK (0x%llx dma); "
+					"in seg %pK (0x%llx dma)",
 					cur_trb,
 					(unsigned long long)xhci_trb_virt_to_dma(cur_seg, cur_trb),
 					cur_seg,
@@ -675,7 +682,7 @@ static void xhci_giveback_urb_in_irq(struct xhci_hcd *xhci,
 void xhci_unmap_td_bounce_buffer(struct xhci_hcd *xhci, struct xhci_ring *ring,
 				 struct xhci_td *td)
 {
-	struct device *dev = xhci_to_hcd(xhci)->self.controller;
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
 	struct xhci_segment *seg = td->bounce_seg;
 	struct urb *urb = td->urb;
 	size_t len;
@@ -766,7 +773,7 @@ static void xhci_handle_cmd_stop_ep(struct xhci_hcd *xhci, int slot_id,
 			 * short, don't muck with the stream ID after
 			 * submission.
 			 */
-			xhci_warn(xhci, "WARN Cancelled URB %p "
+			xhci_warn(xhci, "WARN Cancelled URB %pK "
 					"has invalid stream ID %u.\n",
 					cur_td->urb,
 					cur_td->urb->stream_id);
@@ -1110,7 +1117,7 @@ static void xhci_handle_cmd_set_deq(struct xhci_hcd *xhci, int slot_id,
 				ep_ring, ep_index);
 		} else {
 			xhci_warn(xhci, "Mismatch between completed Set TR Deq Ptr command & xHCI internal state.\n");
-			xhci_warn(xhci, "ep deq seg = %p, deq ptr = %p\n",
+			xhci_warn(xhci, "ep deq seg = %pK, deq ptr = %pK\n",
 				  ep->queued_deq_seg, ep->queued_deq_ptr);
 		}
 	}
@@ -1304,6 +1311,13 @@ void xhci_handle_command_timeout(struct work_struct *work)
 		xhci->cmd_ring_state = CMD_RING_STATE_ABORTED;
 		xhci_dbg(xhci, "Command timeout\n");
 		ret = xhci_abort_cmd_ring(xhci, flags);
+		if (ret == -1) {
+			xhci_err(xhci, "Abort command ring failed reset usb device\n");
+			xhci_cleanup_command_queue(xhci);
+			spin_unlock_irqrestore(&xhci->lock, flags);
+			kick_usbpd_vbus_sm();
+			return;
+		}
 		if (unlikely(ret == -ESHUTDOWN)) {
 			xhci_err(xhci, "Abort command ring failed\n");
 			xhci_cleanup_command_queue(xhci);
@@ -1609,6 +1623,9 @@ static void handle_port_status(struct xhci_hcd *xhci,
 		usb_hcd_resume_root_hub(hcd);
 	}
 
+	if (hcd->speed >= HCD_USB3 && (temp & PORT_PLS_MASK) == XDEV_INACTIVE)
+		bus_state->port_remote_wakeup &= ~(1 << faked_port_index);
+
 	if ((temp & PORT_PLC) && (temp & PORT_PLS_MASK) == XDEV_RESUME) {
 		xhci_dbg(xhci, "port resume event for port %d\n", port_id);
 
@@ -1627,7 +1644,6 @@ static void handle_port_status(struct xhci_hcd *xhci,
 			bus_state->port_remote_wakeup |= 1 << faked_port_index;
 			xhci_test_and_clear_bit(xhci, port_array,
 					faked_port_index, PORT_PLC);
-			usb_hcd_start_port_resume(&hcd->self, faked_port_index);
 			xhci_set_link_state(xhci, port_array, faked_port_index,
 						XDEV_U0);
 			/* Need to wait until the next link state change
@@ -1665,6 +1681,8 @@ static void handle_port_status(struct xhci_hcd *xhci,
 		if (slot_id && xhci->devs[slot_id])
 			xhci_ring_device(xhci, slot_id);
 		if (bus_state->port_remote_wakeup & (1 << faked_port_index)) {
+			bus_state->port_remote_wakeup &=
+				~(1 << faked_port_index);
 			xhci_test_and_clear_bit(xhci, port_array,
 					faked_port_index, PORT_PLC);
 			usb_wakeup_notification(hcd->self.root_hub,
@@ -2634,7 +2652,7 @@ cleanup:
 						 URB_SHORT_NOT_OK)) ||
 					(status != 0 &&
 					 !usb_endpoint_xfer_isoc(&urb->ep->desc)))
-				xhci_dbg(xhci, "Giveback URB %p, len = %d, "
+				xhci_dbg(xhci, "Giveback URB %pK, len = %d, "
 						"expected = %d, status = %d\n",
 						urb, urb->actual_length,
 						urb->transfer_buffer_length,
@@ -3159,7 +3177,7 @@ static u32 xhci_td_remainder(struct xhci_hcd *xhci, int transferred,
 static int xhci_align_td(struct xhci_hcd *xhci, struct urb *urb, u32 enqd_len,
 			 u32 *trb_buff_len, struct xhci_segment *seg)
 {
-	struct device *dev = xhci_to_hcd(xhci)->self.controller;
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
 	unsigned int unalign;
 	unsigned int max_pkt;
 	u32 new_buff_len;
@@ -3493,6 +3511,156 @@ int xhci_queue_ctrl_tx(struct xhci_hcd *xhci, gfp_t mem_flags,
 
 	giveback_first_trb(xhci, slot_id, ep_index, 0,
 			start_cycle, start_trb);
+	return 0;
+}
+
+/*
+ * Variant of xhci_queue_ctrl_tx() used to implement EHSET
+ * SINGLE_STEP_SET_FEATURE test mode. It differs in that the control
+ * transfer is broken up so that the SETUP stage can happen and call
+ * the URB's completion handler before the DATA/STATUS stages are
+ * executed by the xHC hardware. This assumes the control transfer is a
+ * GetDescriptor, with a DATA stage in the IN direction, and an OUT
+ * STATUS stage.
+ *
+ * This function is called twice, usually with a 15-second delay in between.
+ * - with is_setup==true, the SETUP stage for the control request
+ *   (GetDescriptor) is queued in the TRB ring and sent to HW immediately
+ * - with is_setup==false, the DATA and STATUS TRBs are queued and exceuted
+ *
+ * Caller must have locked xhci->lock
+ */
+int xhci_submit_single_step_set_feature(struct usb_hcd *hcd, struct urb *urb,
+					int is_setup)
+{
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct xhci_ring *ep_ring;
+	int num_trbs;
+	int ret;
+	unsigned int slot_id, ep_index;
+	struct usb_ctrlrequest *setup;
+	struct xhci_generic_trb *start_trb;
+	int start_cycle;
+	u32 field, length_field, remainder;
+	struct urb_priv *urb_priv;
+	struct xhci_td *td;
+
+	ep_ring = xhci_urb_to_transfer_ring(xhci, urb);
+	if (!ep_ring)
+		return -EINVAL;
+
+	/* Need buffer for data stage */
+	if (urb->transfer_buffer_length <= 0)
+		return -EINVAL;
+
+	/*
+	 * Need to copy setup packet into setup TRB, so we can't use the setup
+	 * DMA address.
+	 */
+	if (!urb->setup_packet)
+		return -EINVAL;
+	setup = (struct usb_ctrlrequest *) urb->setup_packet;
+
+	slot_id = urb->dev->slot_id;
+	ep_index = xhci_get_endpoint_index(&urb->ep->desc);
+
+	urb_priv = kzalloc(sizeof(struct urb_priv) +
+				  sizeof(struct xhci_td *), GFP_ATOMIC);
+	if (!urb_priv)
+		return -ENOMEM;
+
+	td = urb_priv->td[0] = kzalloc(sizeof(struct xhci_td), GFP_ATOMIC);
+	if (!td) {
+		kfree(urb_priv);
+		return -ENOMEM;
+	}
+
+	urb_priv->length = 1;
+	urb_priv->td_cnt = 0;
+	urb->hcpriv = urb_priv;
+
+	num_trbs = is_setup ? 1 : 2;
+
+	ret = prepare_transfer(xhci, xhci->devs[slot_id],
+			ep_index, urb->stream_id,
+			num_trbs, urb, 0, GFP_ATOMIC);
+	if (ret < 0) {
+		kfree(td);
+		kfree(urb_priv);
+		return ret;
+	}
+
+	/*
+	 * Don't give the first TRB to the hardware (by toggling the cycle bit)
+	 * until we've finished creating all the other TRBs.  The ring's cycle
+	 * state may change as we enqueue the other TRBs, so save it too.
+	 */
+	start_trb = &ep_ring->enqueue->generic;
+	start_cycle = ep_ring->cycle_state;
+
+	if (is_setup) {
+		/* Queue only the setup TRB */
+		field = TRB_IDT | TRB_IOC | TRB_TYPE(TRB_SETUP);
+		if (start_cycle == 0)
+			field |= 0x1;
+
+		/* xHCI 1.0/1.1 6.4.1.2.1: Transfer Type field */
+		if (xhci->hci_version >= 0x100) {
+			if (setup->bRequestType & USB_DIR_IN)
+				field |= TRB_TX_TYPE(TRB_DATA_IN);
+			else
+				field |= TRB_TX_TYPE(TRB_DATA_OUT);
+		}
+
+		/* Save the DMA address of the last TRB in the TD */
+		td->last_trb = ep_ring->enqueue;
+
+		queue_trb(xhci, ep_ring, false,
+			  setup->bRequestType | setup->bRequest << 8 |
+				le16_to_cpu(setup->wValue) << 16,
+			  le16_to_cpu(setup->wIndex) |
+				le16_to_cpu(setup->wLength) << 16,
+			  TRB_LEN(8) | TRB_INTR_TARGET(0),
+			  field);
+	} else {
+		/* Queue data TRB */
+		field = TRB_ISP | TRB_TYPE(TRB_DATA);
+		if (start_cycle == 0)
+			field |= 0x1;
+		if (setup->bRequestType & USB_DIR_IN)
+			field |= TRB_DIR_IN;
+
+		remainder = xhci_td_remainder(xhci, 0,
+					   urb->transfer_buffer_length,
+					   urb->transfer_buffer_length,
+					   urb, 1);
+
+		length_field = TRB_LEN(urb->transfer_buffer_length) |
+			TRB_TD_SIZE(remainder) |
+			TRB_INTR_TARGET(0);
+
+		queue_trb(xhci, ep_ring, true,
+			  lower_32_bits(urb->transfer_dma),
+			  upper_32_bits(urb->transfer_dma),
+			  length_field,
+			  field);
+
+		/* Save the DMA address of the last TRB in the TD */
+		td->last_trb = ep_ring->enqueue;
+
+		/* Queue status TRB */
+		field = TRB_IOC | TRB_TYPE(TRB_STATUS);
+		if (!(setup->bRequestType & USB_DIR_IN))
+			field |= TRB_DIR_IN;
+
+		queue_trb(xhci, ep_ring, false,
+			  0,
+			  0,
+			  TRB_INTR_TARGET(0),
+			  field | ep_ring->cycle_state);
+	}
+
+	giveback_first_trb(xhci, slot_id, ep_index, 0, start_cycle, start_trb);
 	return 0;
 }
 
@@ -4050,7 +4218,7 @@ void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 	int ret;
 
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
-		"Set TR Deq Ptr cmd, new deq seg = %p (0x%llx dma), new deq ptr = %p (0x%llx dma), new cycle = %u",
+		"Set TR Deq Ptr cmd, new deq seg = %pK (0x%llx dma), new deq ptr = %pK (0x%llx dma), new cycle = %u",
 		deq_state->new_deq_seg,
 		(unsigned long long)deq_state->new_deq_seg->dma,
 		deq_state->new_deq_ptr,
@@ -4062,7 +4230,7 @@ void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 				    deq_state->new_deq_ptr);
 	if (addr == 0) {
 		xhci_warn(xhci, "WARN Cannot submit Set TR Deq Ptr\n");
-		xhci_warn(xhci, "WARN deq seg = %p, deq pt = %p\n",
+		xhci_warn(xhci, "WARN deq seg = %pK, deq pt = %pK\n",
 			  deq_state->new_deq_seg, deq_state->new_deq_ptr);
 		return;
 	}

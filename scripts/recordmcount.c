@@ -370,7 +370,8 @@ is_mcounted_section_name(char const *const txtname)
 		strcmp(".softirqentry.text", txtname) == 0 ||
 		strcmp(".kprobes.text", txtname) == 0 ||
 		strcmp(".cpuidle.text", txtname) == 0 ||
-		strcmp(".text.unlikely", txtname) == 0;
+		(strncmp(".text.",       txtname, 6) == 0 &&
+		 strcmp(".text..ftrace", txtname) != 0);
 }
 
 /* 32 bit and 64 bit are very similar */
@@ -466,7 +467,7 @@ do_file(char const *const fname)
 	gpfx = 0;
 	switch (w2(ehdr->e_machine)) {
 	default:
-		fprintf(stderr, "unrecognized e_machine %d %s\n",
+		fprintf(stderr, "unrecognized e_machine %u %s\n",
 			w2(ehdr->e_machine), fname);
 		fail_file();
 		break;

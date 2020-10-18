@@ -314,6 +314,8 @@ memory-hotplug.txt
 	- Hotpluggable memory support, how to use and current status.
 metag/
 	- directory with info about Linux on Meta architecture.
+mhi.txt
+	- Modem Host Interface
 mips/
 	- directory with info about Linux on MIPS architecture.
 misc-devices/
@@ -436,6 +438,8 @@ sysrq.txt
 	- info on the magic SysRq key.
 target/
 	- directory with info on generating TCM v4 fabric .ko modules
+tee.txt
+	- info on the TEE subsystem and drivers
 this_cpu_ops.txt
 	- List rationale behind and the way to use this_cpu operations.
 thermal/

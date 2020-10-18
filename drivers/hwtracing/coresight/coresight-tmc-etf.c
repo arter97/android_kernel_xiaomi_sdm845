@@ -70,7 +70,7 @@ static void tmc_etb_disable_hw(struct tmc_drvdata *drvdata)
 	 * When operating in sysFS mode the content of the buffer needs to be
 	 * read before the TMC is disabled.
 	 */
-	if (local_read(&drvdata->mode) == CS_MODE_SYSFS)
+	if (drvdata->mode == CS_MODE_SYSFS)
 		tmc_etb_dump_hw(drvdata);
 	tmc_disable_hw(drvdata);
 
@@ -103,18 +103,13 @@ static void tmc_etf_disable_hw(struct tmc_drvdata *drvdata)
 	CS_LOCK(drvdata->base);
 }
 
-static int tmc_enable_etf_sink_sysfs(struct coresight_device *csdev, u32 mode)
+static int tmc_enable_etf_sink_sysfs(struct coresight_device *csdev)
 {
 	int ret = 0;
 	bool used = false;
 	char *buf = NULL;
-	long val;
 	unsigned long flags;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
-
-	 /* This shouldn't be happening */
-	if (WARN_ON(mode != CS_MODE_SYSFS))
-		return -EINVAL;
 
 	/*
 	 * If we don't have a buffer release the lock and allocate memory.
@@ -138,13 +133,12 @@ static int tmc_enable_etf_sink_sysfs(struct coresight_device *csdev, u32 mode)
 		goto out;
 	}
 
-	val = local_xchg(&drvdata->mode, mode);
 	/*
 	 * In sysFS mode we can have multiple writers per sink.  Since this
 	 * sink is already enabled no memory is needed and the HW need not be
 	 * touched.
 	 */
-	if (val == CS_MODE_SYSFS)
+	if (drvdata->mode == CS_MODE_SYSFS)
 		goto out;
 
 	/*
@@ -163,6 +157,7 @@ static int tmc_enable_etf_sink_sysfs(struct coresight_device *csdev, u32 mode)
 		drvdata->buf = buf;
 	}
 
+	drvdata->mode = CS_MODE_SYSFS;
 	tmc_etb_enable_hw(drvdata);
 out:
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
@@ -171,22 +166,20 @@ out:
 	if (!used)
 		kfree(buf);
 
-	if (!ret)
+	if (!ret) {
+		coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
+		coresight_cti_map_trigout(drvdata->cti_flush, 1, 0);
 		dev_info(drvdata->dev, "TMC-ETB/ETF enabled\n");
+	}
 
 	return ret;
 }
 
-static int tmc_enable_etf_sink_perf(struct coresight_device *csdev, u32 mode)
+static int tmc_enable_etf_sink_perf(struct coresight_device *csdev)
 {
 	int ret = 0;
-	long val;
 	unsigned long flags;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
-
-	 /* This shouldn't be happening */
-	if (WARN_ON(mode != CS_MODE_PERF))
-		return -EINVAL;
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	if (drvdata->reading) {
@@ -194,17 +187,17 @@ static int tmc_enable_etf_sink_perf(struct coresight_device *csdev, u32 mode)
 		goto out;
 	}
 
-	val = local_xchg(&drvdata->mode, mode);
 	/*
 	 * In Perf mode there can be only one writer per sink.  There
 	 * is also no need to continue if the ETB/ETR is already operated
 	 * from sysFS.
 	 */
-	if (val != CS_MODE_DISABLED) {
+	if (drvdata->mode != CS_MODE_DISABLED) {
 		ret = -EINVAL;
 		goto out;
 	}
 
+	drvdata->mode = CS_MODE_PERF;
 	tmc_etb_enable_hw(drvdata);
 out:
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
@@ -216,9 +209,9 @@ static int tmc_enable_etf_sink(struct coresight_device *csdev, u32 mode)
 {
 	switch (mode) {
 	case CS_MODE_SYSFS:
-		return tmc_enable_etf_sink_sysfs(csdev, mode);
+		return tmc_enable_etf_sink_sysfs(csdev);
 	case CS_MODE_PERF:
-		return tmc_enable_etf_sink_perf(csdev, mode);
+		return tmc_enable_etf_sink_perf(csdev);
 	}
 
 	/* We shouldn't be here */
@@ -227,7 +220,6 @@ static int tmc_enable_etf_sink(struct coresight_device *csdev, u32 mode)
 
 static void tmc_disable_etf_sink(struct coresight_device *csdev)
 {
-	long val;
 	unsigned long flags;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 
@@ -237,12 +229,16 @@ static void tmc_disable_etf_sink(struct coresight_device *csdev)
 		return;
 	}
 
-	val = local_xchg(&drvdata->mode, CS_MODE_DISABLED);
 	/* Disable the TMC only if it needs to */
-	if (val != CS_MODE_DISABLED)
+	if (drvdata->mode != CS_MODE_DISABLED) {
 		tmc_etb_disable_hw(drvdata);
+		drvdata->mode = CS_MODE_DISABLED;
+	}
 
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+
+	coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
+	coresight_cti_unmap_trigout(drvdata->cti_flush, 1, 0);
 
 	dev_info(drvdata->dev, "TMC-ETB/ETF disabled\n");
 }
@@ -260,7 +256,7 @@ static int tmc_enable_etf_link(struct coresight_device *csdev,
 	}
 
 	tmc_etf_enable_hw(drvdata);
-	local_set(&drvdata->mode, CS_MODE_SYSFS);
+	drvdata->mode = CS_MODE_SYSFS;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 	dev_info(drvdata->dev, "TMC-ETF enabled\n");
@@ -280,7 +276,7 @@ static void tmc_disable_etf_link(struct coresight_device *csdev,
 	}
 
 	tmc_etf_disable_hw(drvdata);
-	local_set(&drvdata->mode, CS_MODE_DISABLED);
+	drvdata->mode = CS_MODE_DISABLED;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 	dev_info(drvdata->dev, "TMC disabled\n");
@@ -381,7 +377,7 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 		return;
 
 	/* This shouldn't happen */
-	if (WARN_ON_ONCE(local_read(&drvdata->mode) != CS_MODE_PERF))
+	if (WARN_ON_ONCE(drvdata->mode != CS_MODE_PERF))
 		return;
 
 	CS_UNLOCK(drvdata->base);
@@ -476,6 +472,36 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 	CS_LOCK(drvdata->base);
 }
 
+static void tmc_abort_etf_sink(struct coresight_device *csdev)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
+	unsigned long flags;
+	enum tmc_mode mode;
+
+	spin_lock_irqsave(&drvdata->spinlock, flags);
+	if (drvdata->reading)
+		goto out0;
+
+	if (drvdata->config_type == TMC_CONFIG_TYPE_ETB) {
+		tmc_etb_disable_hw(drvdata);
+	} else {
+
+		mode = readl_relaxed(drvdata->base + TMC_MODE);
+		if (mode == TMC_MODE_CIRCULAR_BUFFER)
+			tmc_etb_disable_hw(drvdata);
+		else
+			goto out1;
+	}
+out0:
+	drvdata->enable = false;
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+
+	dev_info(drvdata->dev, "TMC aborted\n");
+	return;
+out1:
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+}
+
 static const struct coresight_ops_sink tmc_etf_sink_ops = {
 	.enable		= tmc_enable_etf_sink,
 	.disable	= tmc_disable_etf_sink,
@@ -484,6 +510,7 @@ static const struct coresight_ops_sink tmc_etf_sink_ops = {
 	.set_buffer	= tmc_set_etf_buffer,
 	.reset_buffer	= tmc_reset_etf_buffer,
 	.update_buffer	= tmc_update_etf_buffer,
+	.abort		= tmc_abort_etf_sink,
 };
 
 static const struct coresight_ops_link tmc_etf_link_ops = {
@@ -502,7 +529,6 @@ const struct coresight_ops tmc_etf_cs_ops = {
 
 int tmc_read_prepare_etb(struct tmc_drvdata *drvdata)
 {
-	long val;
 	enum tmc_mode mode;
 	int ret = 0;
 	unsigned long flags;
@@ -519,16 +545,17 @@ int tmc_read_prepare_etb(struct tmc_drvdata *drvdata)
 		goto out;
 	}
 
-	/* There is no point in reading a TMC in HW FIFO mode */
-	mode = readl_relaxed(drvdata->base + TMC_MODE);
-	if (mode != TMC_MODE_CIRCULAR_BUFFER) {
-		ret = -EINVAL;
-		goto out;
+	if (drvdata->enable) {
+		/* There is no point in reading a TMC in HW FIFO mode */
+		mode = readl_relaxed(drvdata->base + TMC_MODE);
+		if (mode != TMC_MODE_CIRCULAR_BUFFER) {
+			ret = -EINVAL;
+			goto out;
+		}
 	}
 
-	val = local_read(&drvdata->mode);
 	/* Don't interfere if operated from Perf */
-	if (val == CS_MODE_PERF) {
+	if (drvdata->mode == CS_MODE_PERF) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -540,7 +567,7 @@ int tmc_read_prepare_etb(struct tmc_drvdata *drvdata)
 	}
 
 	/* Disable the TMC if need be */
-	if (val == CS_MODE_SYSFS)
+	if (drvdata->mode == CS_MODE_SYSFS)
 		tmc_etb_disable_hw(drvdata);
 
 	drvdata->reading = true;
@@ -563,15 +590,17 @@ int tmc_read_unprepare_etb(struct tmc_drvdata *drvdata)
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
-	/* There is no point in reading a TMC in HW FIFO mode */
-	mode = readl_relaxed(drvdata->base + TMC_MODE);
-	if (mode != TMC_MODE_CIRCULAR_BUFFER) {
-		spin_unlock_irqrestore(&drvdata->spinlock, flags);
-		return -EINVAL;
+	if (drvdata->enable) {
+		/* There is no point in reading a TMC in HW FIFO mode */
+		mode = readl_relaxed(drvdata->base + TMC_MODE);
+		if (mode != TMC_MODE_CIRCULAR_BUFFER) {
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			return -EINVAL;
+		}
 	}
 
 	/* Re-enable the TMC if need be */
-	if (local_read(&drvdata->mode) == CS_MODE_SYSFS) {
+	if (drvdata->mode == CS_MODE_SYSFS) {
 		/*
 		 * The trace run will continue with the same allocated trace
 		 * buffer. As such zero-out the buffer so that we don't end

@@ -398,6 +398,17 @@ struct hc_driver {
 	/* Call for power on/off the port if necessary */
 	int	(*port_power)(struct usb_hcd *hcd, int portnum, bool enable);
 
+	int (*sec_event_ring_setup)(struct usb_hcd *hcd, unsigned int intr_num);
+	int (*sec_event_ring_cleanup)(struct usb_hcd *hcd,
+			unsigned int intr_num);
+	phys_addr_t (*get_sec_event_ring_phys_addr)(struct usb_hcd *hcd,
+			unsigned int intr_num, dma_addr_t *dma);
+	phys_addr_t (*get_xfer_ring_phys_addr)(struct usb_hcd *hcd,
+			struct usb_device *udev, struct usb_host_endpoint *ep,
+			dma_addr_t *dma);
+	int (*get_core_id)(struct usb_hcd *hcd);
+	int (*stop_endpoint)(struct usb_hcd *hcd, struct usb_device *udev,
+			struct usb_host_endpoint *ep);
 };
 
 static inline int hcd_giveback_urb_in_bh(struct usb_hcd *hcd)
@@ -436,7 +447,21 @@ extern int usb_hcd_alloc_bandwidth(struct usb_device *udev,
 		struct usb_host_interface *old_alt,
 		struct usb_host_interface *new_alt);
 extern int usb_hcd_get_frame_number(struct usb_device *udev);
+extern int usb_hcd_sec_event_ring_setup(struct usb_device *udev,
+	unsigned int intr_num);
+extern int usb_hcd_sec_event_ring_cleanup(struct usb_device *udev,
+	unsigned int intr_num);
+extern phys_addr_t usb_hcd_get_sec_event_ring_phys_addr(
+	struct usb_device *udev, unsigned int intr_num, dma_addr_t *dma);
+extern phys_addr_t usb_hcd_get_xfer_ring_phys_addr(
+	struct usb_device *udev, struct usb_host_endpoint *ep, dma_addr_t *dma);
+extern int usb_hcd_get_controller_id(struct usb_device *udev);
+extern int usb_hcd_stop_endpoint(struct usb_device *udev,
+	struct usb_host_endpoint *ep);
 
+struct usb_hcd *__usb_create_hcd(const struct hc_driver *driver,
+		struct device *sysdev, struct device *dev, const char *bus_name,
+		struct usb_hcd *primary_hcd);
 extern struct usb_hcd *usb_create_hcd(const struct hc_driver *driver,
 		struct device *dev, const char *bus_name);
 extern struct usb_hcd *usb_create_shared_hcd(const struct hc_driver *driver,
@@ -485,7 +510,7 @@ extern void usb_hc_died(struct usb_hcd *hcd);
 extern void usb_hcd_poll_rh_status(struct usb_hcd *hcd);
 extern void usb_wakeup_notification(struct usb_device *hdev,
 		unsigned int portnum);
-
+extern void usb_flush_hub_wq(void);
 extern void usb_hcd_start_port_resume(struct usb_bus *bus, int portnum);
 extern void usb_hcd_end_port_resume(struct usb_bus *bus, int portnum);
 
@@ -639,6 +664,7 @@ extern wait_queue_head_t usb_kill_urb_queue;
 
 #define usb_endpoint_out(ep_dir)	(!((ep_dir) & USB_DIR_IN))
 
+#ifdef CONFIG_USB
 #ifdef CONFIG_PM
 extern void usb_root_hub_lost_power(struct usb_device *rhdev);
 extern int hcd_bus_suspend(struct usb_device *rhdev, pm_message_t msg);
@@ -650,7 +676,15 @@ static inline void usb_hcd_resume_root_hub(struct usb_hcd *hcd)
 	return;
 }
 #endif /* CONFIG_PM */
-
+#else  /* CONFIG_USB */
+extern int usb_add_hcd(struct usb_hcd *hcd,
+		unsigned int irqnum, unsigned long irqflags)
+{
+	return 0;
+}
+extern void usb_remove_hcd(struct usb_hcd *hcd) {}
+extern void usb_hcd_resume_root_hub(struct usb_hcd *hcd) {}
+#endif /* CONFIG_USB */
 /*-------------------------------------------------------------------------*/
 
 #if defined(CONFIG_USB_MON) || defined(CONFIG_USB_MON_MODULE)

@@ -165,6 +165,11 @@ config FW_LOADER_USER_HELPER_FALLBACK
 
 	  If you are unsure about this, say N here.
 
+config FW_CACHE
+       bool "Enable firmware caching during suspend"
+       depends on PM_SLEEP
+       default n
+
 config WANT_DEV_COREDUMP
 	bool
 	help
@@ -246,7 +251,6 @@ source "drivers/base/regmap/Kconfig"
 config DMA_SHARED_BUFFER
 	bool
 	default n
-	select ANON_INODES
 	help
 	  This option enables the framework for buffer-sharing between
 	  multiple drivers. A buffer is associated with a file using driver

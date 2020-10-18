@@ -212,6 +212,20 @@ struct detailed_timing {
 #define DRM_EDID_HDMI_DC_30               (1 << 4)
 #define DRM_EDID_HDMI_DC_Y444             (1 << 3)
 
+/* YCBCR 420 deep color modes */
+#define DRM_EDID_YCBCR420_DC_48  (1 << 2)
+#define DRM_EDID_YCBCR420_DC_36  (1 << 1)
+#define DRM_EDID_YCBCR420_DC_30  (1 << 0)
+
+#define DRM_EDID_COLORIMETRY_xvYCC_601	(1 << 0)
+#define DRM_EDID_COLORIMETRY_xvYCC_709	(1 << 1)
+#define DRM_EDID_COLORIMETRY_sYCC_601	(1 << 2)
+#define DRM_EDID_COLORIMETRY_ADBYCC_601	(1 << 3)
+#define DRM_EDID_COLORIMETRY_ADB_RGB	(1 << 4)
+#define DRM_EDID_COLORIMETRY_BT2020_CYCC	(1 << 5)
+#define DRM_EDID_COLORIMETRY_BT2020_YCC	(1 << 6)
+#define DRM_EDID_COLORIMETRY_BT2020_RGB	(1 << 7)
+
 /* ELD Header Block */
 #define DRM_ELD_HEADER_BLOCK_SIZE	4
 
@@ -268,6 +282,11 @@ struct detailed_timing {
 #define DRM_ELD_MONITOR_NAME_STRING	20	/* offsets 20..(20+mnl-1) inclusive */
 
 #define DRM_ELD_CEA_SAD(mnl, sad)	(20 + (mnl) + 3 * (sad))
+
+/* HDMI 2.0 */
+#define DRM_EDID_3D_INDEPENDENT_VIEW	(1 << 2)
+#define DRM_EDID_3D_DUAL_VIEW		(1 << 1)
+#define DRM_EDID_3D_OSD_DISPARITY	(1 << 0)
 
 struct edid {
 	u8 header[8];
@@ -439,6 +458,7 @@ struct edid *drm_edid_duplicate(const struct edid *edid);
 int drm_add_edid_modes(struct drm_connector *connector, struct edid *edid);
 
 u8 drm_match_cea_mode(const struct drm_display_mode *to_match);
+u8 drm_match_hdmi_mode(const struct drm_display_mode *to_match);
 enum hdmi_picture_aspect drm_get_cea_aspect_ratio(const u8 video_code);
 bool drm_detect_hdmi_monitor(struct edid *edid);
 bool drm_detect_monitor_audio(struct edid *edid);

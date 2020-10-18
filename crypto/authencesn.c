@@ -36,7 +36,7 @@ struct crypto_authenc_esn_ctx {
 	unsigned int reqoff;
 	struct crypto_ahash *auth;
 	struct crypto_skcipher *enc;
-	struct crypto_skcipher *null;
+	struct crypto_sync_skcipher *null;
 };
 
 struct authenc_esn_request_ctx {
@@ -183,9 +183,9 @@ static int crypto_authenc_esn_copy(struct aead_request *req, unsigned int len)
 {
 	struct crypto_aead *authenc_esn = crypto_aead_reqtfm(req);
 	struct crypto_authenc_esn_ctx *ctx = crypto_aead_ctx(authenc_esn);
-	SKCIPHER_REQUEST_ON_STACK(skreq, ctx->null);
+	SYNC_SKCIPHER_REQUEST_ON_STACK(skreq, ctx->null);
 
-	skcipher_request_set_tfm(skreq, ctx->null);
+	skcipher_request_set_sync_tfm(skreq, ctx->null);
 	skcipher_request_set_callback(skreq, aead_request_flags(req),
 				      NULL, NULL);
 	skcipher_request_set_crypt(skreq, req->src, req->dst, len, NULL);
@@ -341,19 +341,19 @@ static int crypto_authenc_esn_init_tfm(struct crypto_aead *tfm)
 	struct crypto_authenc_esn_ctx *ctx = crypto_aead_ctx(tfm);
 	struct crypto_ahash *auth;
 	struct crypto_skcipher *enc;
-	struct crypto_skcipher *null;
+	struct crypto_sync_skcipher *null;
 	int err;
 
 	auth = crypto_spawn_ahash(&ictx->auth);
 	if (IS_ERR(auth))
 		return PTR_ERR(auth);
 
-	enc = crypto_spawn_skcipher2(&ictx->enc);
+	enc = crypto_spawn_skcipher(&ictx->enc);
 	err = PTR_ERR(enc);
 	if (IS_ERR(enc))
 		goto err_free_ahash;
 
-	null = crypto_get_default_null_skcipher2();
+	null = crypto_get_default_null_skcipher();
 	err = PTR_ERR(null);
 	if (IS_ERR(null))
 		goto err_free_skcipher;
@@ -390,7 +390,7 @@ static void crypto_authenc_esn_exit_tfm(struct crypto_aead *tfm)
 
 	crypto_free_ahash(ctx->auth);
 	crypto_free_skcipher(ctx->enc);
-	crypto_put_default_null_skcipher2();
+	crypto_put_default_null_skcipher();
 }
 
 static void crypto_authenc_esn_free(struct aead_instance *inst)
@@ -447,9 +447,9 @@ static int crypto_authenc_esn_create(struct crypto_template *tmpl,
 		goto err_free_inst;
 
 	crypto_set_skcipher_spawn(&ctx->enc, aead_crypto_instance(inst));
-	err = crypto_grab_skcipher2(&ctx->enc, enc_name, 0,
-				    crypto_requires_sync(algt->type,
-							 algt->mask));
+	err = crypto_grab_skcipher(&ctx->enc, enc_name, 0,
+				   crypto_requires_sync(algt->type,
+							algt->mask));
 	if (err)
 		goto err_drop_auth;
 

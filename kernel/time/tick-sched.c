@@ -22,13 +22,19 @@
 #include <linux/module.h>
 #include <linux/irq_work.h>
 #include <linux/posix-timers.h>
+#include <linux/timer.h>
 #include <linux/context_tracking.h>
+#include <linux/rq_stats.h>
 
 #include <asm/irq_regs.h>
 
 #include "tick-internal.h"
 
 #include <trace/events/timer.h>
+
+struct rq_data rq_info;
+struct workqueue_struct *rq_wq;
+spinlock_t rq_lock;
 
 /*
  * Per-CPU nohz control structure
@@ -45,6 +51,21 @@ struct tick_sched *tick_get_tick_sched(int cpu)
  * The time, when the last jiffy update happened. Protected by jiffies_lock.
  */
 static ktime_t last_jiffies_update;
+
+u64 jiffy_to_ktime_ns(u64 *now, u64 *jiffy_ktime_ns)
+{
+	u64 cur_jiffies;
+	unsigned long seq;
+
+	do {
+		seq = read_seqbegin(&jiffies_lock);
+		*now = ktime_get_ns();
+		*jiffy_ktime_ns = ktime_to_ns(last_jiffies_update);
+		cur_jiffies = get_jiffies_64();
+	} while (read_seqretry(&jiffies_lock, seq));
+
+	return cur_jiffies;
+}
 
 /*
  * Must be called with interrupts disabled !
@@ -390,24 +411,16 @@ static int __init tick_nohz_full_setup(char *str)
 }
 __setup("nohz_full=", tick_nohz_full_setup);
 
-static int tick_nohz_cpu_down_callback(struct notifier_block *nfb,
-				       unsigned long action,
-				       void *hcpu)
+static int tick_nohz_cpu_down(unsigned int cpu)
 {
-	unsigned int cpu = (unsigned long)hcpu;
-
-	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_DOWN_PREPARE:
-		/*
-		 * The boot CPU handles housekeeping duty (unbound timers,
-		 * workqueues, timekeeping, ...) on behalf of full dynticks
-		 * CPUs. It must remain online when nohz full is enabled.
-		 */
-		if (tick_nohz_full_running && tick_do_timer_cpu == cpu)
-			return NOTIFY_BAD;
-		break;
-	}
-	return NOTIFY_OK;
+	/*
+	 * The boot CPU handles housekeeping duty (unbound timers,
+	 * workqueues, timekeeping, ...) on behalf of full dynticks
+	 * CPUs. It must remain online when nohz full is enabled.
+	 */
+	if (tick_nohz_full_running && tick_do_timer_cpu == cpu)
+		return -EBUSY;
+	return 0;
 }
 
 static int tick_nohz_init_all(void)
@@ -428,7 +441,7 @@ static int tick_nohz_init_all(void)
 
 void __init tick_nohz_init(void)
 {
-	int cpu;
+	int cpu, ret;
 
 	if (!tick_nohz_full_running) {
 		if (tick_nohz_init_all() < 0)
@@ -469,7 +482,10 @@ void __init tick_nohz_init(void)
 	for_each_cpu(cpu, tick_nohz_full_mask)
 		context_tracking_cpu_set(cpu);
 
-	cpu_notifier(tick_nohz_cpu_down_callback, 0);
+	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+					"kernel/nohz:predown", NULL,
+					tick_nohz_cpu_down);
+	WARN_ON(ret < 0);
 	pr_info("NO_HZ: Full dynticks CPUs: %*pbl.\n",
 		cpumask_pr_args(tick_nohz_full_mask));
 
@@ -926,6 +942,11 @@ static void __tick_nohz_idle_enter(struct tick_sched *ts)
 	ktime_t now, expires;
 	int cpu = smp_processor_id();
 
+#ifdef CONFIG_SMP
+	if (check_pending_deferrable_timers(cpu))
+		raise_softirq_irqoff(TIMER_SOFTIRQ);
+#endif
+
 	now = tick_nohz_start_idle(ts);
 
 	if (can_stop_idle_tick(cpu, ts)) {
@@ -1007,6 +1028,18 @@ ktime_t tick_nohz_get_sleep_length(void)
 	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);
 
 	return ts->sleep_length;
+}
+
+/**
+ * tick_nohz_get_idle_calls - return the current idle calls counter value
+ *
+ * Called from the schedutil frequency scaling governor in scheduler context.
+ */
+unsigned long tick_nohz_get_idle_calls(void)
+{
+	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);
+
+	return ts->idle_calls;
 }
 
 static void tick_nohz_account_idle_ticks(struct tick_sched *ts)
@@ -1157,6 +1190,42 @@ void tick_irq_enter(void)
  * High resolution timer specific code
  */
 #ifdef CONFIG_HIGH_RES_TIMERS
+static void update_rq_stats(void)
+{
+	unsigned long jiffy_gap = 0;
+	unsigned long long rq_avg = 0;
+	unsigned long flags = 0;
+
+	jiffy_gap = jiffies - rq_info.rq_poll_last_jiffy;
+	if (jiffy_gap >= rq_info.rq_poll_jiffies) {
+		spin_lock_irqsave(&rq_lock, flags);
+		if (!rq_info.rq_avg)
+			rq_info.rq_poll_total_jiffies = 0;
+		rq_avg = nr_running() * 10;
+		if (rq_info.rq_poll_total_jiffies) {
+			rq_avg = (rq_avg * jiffy_gap) +
+				(rq_info.rq_avg *
+				 rq_info.rq_poll_total_jiffies);
+			do_div(rq_avg,
+				rq_info.rq_poll_total_jiffies + jiffy_gap);
+		}
+		rq_info.rq_avg = rq_avg;
+		rq_info.rq_poll_total_jiffies += jiffy_gap;
+		rq_info.rq_poll_last_jiffy = jiffies;
+		spin_unlock_irqrestore(&rq_lock, flags);
+	}
+}
+static void wakeup_user(void)
+{
+	unsigned long jiffy_gap;
+
+	jiffy_gap = jiffies - rq_info.def_timer_last_jiffy;
+	if (jiffy_gap >= rq_info.def_timer_jiffies) {
+		rq_info.def_timer_last_jiffy = jiffies;
+		queue_work(rq_wq, &rq_info.def_timer_work);
+	}
+}
+
 /*
  * We rearm the timer until we get disabled by the idle code.
  * Called with interrupts disabled.
@@ -1174,8 +1243,20 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 	 * Do not call, when we are not in irq context and have
 	 * no valid regs pointer
 	 */
-	if (regs)
+	if (regs) {
 		tick_sched_handle(ts, regs);
+		if (rq_info.init == 1 &&
+				tick_do_timer_cpu == smp_processor_id()) {
+			/*
+			 * update run queue statistics
+			 */
+			update_rq_stats();
+			/*
+			 * wakeup user if needed
+			 */
+			wakeup_user();
+		}
+	}
 
 	/* No need to reprogram if we are in idle or full dynticks mode */
 	if (unlikely(ts->tick_stopped))
@@ -1288,4 +1369,9 @@ int tick_check_oneshot_change(int allow_nohz)
 
 	tick_nohz_switch_to_nohz();
 	return 0;
+}
+
+ktime_t *get_next_event_cpu(unsigned int cpu)
+{
+	return &(per_cpu(tick_cpu_device, cpu).evtdev->next_event);
 }

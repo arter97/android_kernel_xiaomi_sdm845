@@ -19,6 +19,7 @@
 #include <asm/bug.h>
 #include <asm/proc-fns.h>
 
+#include <asm/bug.h>
 #include <asm/memory.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable-prot.h>
@@ -52,7 +53,7 @@ extern void __pgd_error(const char *file, int line, unsigned long val);
  * for zero-mapped memory areas etc..
  */
 extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
-#define ZERO_PAGE(vaddr)	pfn_to_page(PHYS_PFN(__pa(empty_zero_page)))
+#define ZERO_PAGE(vaddr)	phys_to_page(__pa_symbol(empty_zero_page))
 
 #define pte_ERROR(pte)		__pte_error(__FILE__, __LINE__, pte_val(pte))
 
@@ -185,6 +186,34 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
 
 static inline void set_pte(pte_t *ptep, pte_t pte)
 {
+#ifdef CONFIG_ARM64_STRICT_BREAK_BEFORE_MAKE
+	pteval_t old = pte_val(*ptep);
+	pteval_t new = pte_val(pte);
+
+	/* Only problematic if valid -> valid */
+	if (!(old & new & PTE_VALID))
+		goto pte_ok;
+
+	/* Changing attributes should go via an invalid entry */
+	if (WARN_ON((old & PTE_ATTRINDX_MASK) != (new & PTE_ATTRINDX_MASK)))
+		goto pte_bad;
+
+	/* Change of OA is only an issue if one mapping is writable */
+	if (!(old & new & PTE_RDONLY) &&
+	    WARN_ON(pte_pfn(*ptep) != pte_pfn(pte)))
+		goto pte_bad;
+
+	goto pte_ok;
+
+pte_bad:
+	*ptep = __pte(0);
+	dsb(ishst);
+	asm("tlbi	vmalle1is");
+	dsb(ish);
+	isb();
+pte_ok:
+#endif
+
 	*ptep = pte;
 
 	/*

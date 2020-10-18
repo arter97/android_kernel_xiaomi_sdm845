@@ -8,7 +8,7 @@ menu "Multifunction device drivers"
 config MFD_CORE
 	tristate
 	select IRQ_DOMAIN
-	default n
+	default y
 
 config MFD_CS5535
 	tristate "AMD CS5535 and CS5536 southbridge core functions"
@@ -774,6 +774,17 @@ config MFD_PM8921_CORE
 
 	  Say M here if you want to include support for PM8921 chip as a module.
 	  This will build a module called "pm8921-core".
+
+config MFD_I2C_PMIC
+	tristate "QTI I2C PMIC support"
+	depends on I2C && OF
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	help
+	  This enables support for controlling Qualcomm Technologies, Inc.
+	  PMICs over I2C. The driver controls interrupts, and provides register
+	  access for all of the device's peripherals.  Some QTI PMIC chips
+	  support communication over both I2C and SPMI.
 
 config MFD_QCOM_RPM
 	tristate "Qualcomm Resource Power Manager (RPM)"
@@ -1606,6 +1617,24 @@ config MFD_STW481X
 	  Select this option to enable the STw481x chip driver used
 	  in various ST Microelectronics and ST-Ericsson embedded
 	  Nomadik series.
+
+config MSM_CDC_PINCTRL
+	tristate "MSM Codec Pinctrl"
+	select MFD_CORE
+	help
+	  Enables msm codec pinctrl driver. The pinctrl driver
+	  provides support for handling WCD and WSA MSM gpios. This
+	  pinctrl driver will handle WCD and WSA gpios pinctrl states.
+	  This driver acts as interface between codec and pinctrl
+	  framework.
+
+config MSM_CDC_SUPPLY
+	tristate "MSM Codec Power Supply"
+	help
+	  Enables msm codec power supply driver. The power supply
+	  driver provides API support for handling WCD and WSA codec
+	  power supply enable or disable. This driver acts as interface
+	  between codec and regulator framework.
 
 menu "Multimedia Capabilities Port drivers"
 	depends on ARCH_SA1100

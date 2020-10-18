@@ -312,15 +312,20 @@ config AUDIT
 	help
 	  Enable auditing infrastructure that can be used with another
 	  kernel subsystem, such as SELinux (which requires this for
-	  logging of avc messages output).  System call auditing is included
-	  on architectures which support it.
+	  logging of avc messages output). Does not do system-call
+	  auditing without CONFIG_AUDITSYSCALL.
 
 config HAVE_ARCH_AUDITSYSCALL
 	bool
 
 config AUDITSYSCALL
-	def_bool y
+	bool "Enable system-call auditing support"
 	depends on AUDIT && HAVE_ARCH_AUDITSYSCALL
+	default y if SECURITY_SELINUX
+	help
+	  Enable low-overhead system-call auditing infrastructure that
+	  can be used independently or with another kernel subsystem,
+	  such as SELinux.
 
 config AUDIT_WATCH
 	def_bool y
@@ -400,6 +405,15 @@ config IRQ_TIME_ACCOUNTING
 
 	  If in doubt, say N here.
 
+config SCHED_WALT
+        bool "Support window based load tracking"
+        depends on SMP
+        help
+        This feature will allow the scheduler to maintain a tunable window
+	based set of metrics for tasks and runqueues. These metrics can be
+	used to guide task placement as well as task frequency requirements
+	for cpufreq governors.
+
 config BSD_PROCESS_ACCT
 	bool "BSD Process Accounting"
 	depends on MULTIUSER
@@ -467,6 +481,45 @@ config TASK_IO_ACCOUNTING
 	help
 	  Collect information on the number of bytes of storage I/O which this
 	  task has caused.
+
+	  Say N if unsure.
+
+config PSI
+	bool "Pressure stall information tracking"
+	help
+	  Collect metrics that indicate how overcommitted the CPU, memory,
+	  and IO capacity are in the system.
+
+	  If you say Y here, the kernel will create /proc/pressure/ with the
+	  pressure statistics files cpu, memory, and io. These will indicate
+	  the share of walltime in which some or all tasks in the system are
+	  delayed due to contention of the respective resource.
+
+	  In kernels with cgroup support, cgroups (cgroup2 only) will
+	  have cpu.pressure, memory.pressure, and io.pressure files,
+	  which aggregate pressure stalls for the grouped tasks only.
+
+	  For more details see Documentation/accounting/psi.txt.
+
+	  Say N if unsure.
+
+config PSI_DEFAULT_DISABLED
+	bool "Require boot parameter to enable pressure stall information tracking"
+	default n
+	depends on PSI
+	help
+	  If set, pressure stall information tracking will be disabled
+	  per default but can be enabled through passing psi=1 on the
+	  kernel commandline during boot.
+
+	  This feature adds some code to the task wakeup and sleep
+	  paths of the scheduler. The overhead is too low to affect
+	  common scheduling-intense workloads in practice (such as
+	  webservers, memcache), but it does show up in artificial
+	  scheduler stress tests, such as hackbench.
+
+	  If you are paranoid and not sure what the kernel will be
+	  used for, say Y.
 
 	  Say N if unsure.
 
@@ -781,19 +834,6 @@ config RCU_NOCB_CPU_ALL
 
 endchoice
 
-config RCU_EXPEDITE_BOOT
-	bool
-	default n
-	help
-	  This option enables expedited grace periods at boot time,
-	  as if rcu_expedite_gp() had been invoked early in boot.
-	  The corresponding rcu_unexpedite_gp() is invoked from
-	  rcu_end_inkernel_boot(), which is intended to be invoked
-	  at the end of the kernel-only boot sequence, just before
-	  init is exec'ed.
-
-	  Accept the default if unsure.
-
 endmenu # "RCU Subsystem"
 
 config BUILD_BIN2C
@@ -820,6 +860,15 @@ config IKCONFIG_PROC
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
 
+config IKHEADERS
+	tristate "Enable kernel headers through /sys/kernel/kheaders.tar.xz"
+	depends on SYSFS
+	help
+	  This option enables access to the in-kernel headers that are generated during
+	  the build process. These can be used to build eBPF tracing programs,
+	  or similar programs.  If you build the headers as a module, a module called
+	  kheaders.ko is built which can be loaded on-demand to get access to headers.
+
 config LOG_BUF_SHIFT
 	int "Kernel log buffer size (16 => 64KB, 17 => 128KB)"
 	range 12 25
@@ -838,6 +887,16 @@ config LOG_BUF_SHIFT
 		     14 => 16 KB
 		     13 =>  8 KB
 		     12 =>  4 KB
+
+config CONSOLE_FLUSH_ON_HOTPLUG
+	bool "Enable console flush configurable in hot plug code path"
+	depends on HOTPLUG_CPU
+	def_bool n
+	help
+	In cpu hot plug path console lock acquire and release causes the
+	console to flush. If console lock is not free hot plug latency
+	increases. So make console flush configurable in hot plug path
+	and default disabled to help in cpu hot plug latencies.
 
 config LOG_CPU_MAX_BUF_SHIFT
 	int "CPU kernel log buffer size contribution (13 => 8 KB, 17 => 128KB)"
@@ -971,6 +1030,88 @@ menuconfig CGROUPS
 
 if CGROUPS
 
+config CGROUP_DEBUG
+	bool "Example debug cgroup subsystem"
+	default n
+	help
+	  This option enables a simple cgroup subsystem that
+	  exports useful debugging information about the cgroups
+	  framework.
+
+	  Say N if unsure.
+
+config CGROUP_FREEZER
+	bool "Freezer cgroup subsystem"
+	help
+	  Provides a way to freeze and unfreeze all tasks in a
+	  cgroup.
+
+config CGROUP_PIDS
+	bool "PIDs cgroup subsystem"
+	help
+	  Provides enforcement of process number limits in the scope of a
+	  cgroup. Any attempt to fork more processes than is allowed in the
+	  cgroup will fail. PIDs are fundamentally a global resource because it
+	  is fairly trivial to reach PID exhaustion before you reach even a
+	  conservative kmemcg limit. As a result, it is possible to grind a
+	  system to halt without being limited by other cgroup policies. The
+	  PIDs cgroup subsystem is designed to stop this from happening.
+
+	  It should be noted that organisational operations (such as attaching
+	  to a cgroup hierarchy will *not* be blocked by the PIDs subsystem),
+	  since the PIDs limit only affects a process's ability to fork, not to
+	  attach to a cgroup.
+
+config CGROUP_DEVICE
+	bool "Device controller for cgroups"
+	help
+	  Provides a cgroup implementing whitelists for devices which
+	  a process in the cgroup can mknod or open.
+
+config CPUSETS
+	bool "Cpuset support"
+	help
+	  This option will let you create and manage CPUSETs which
+	  allow dynamically partitioning a system into sets of CPUs and
+	  Memory Nodes and assigning tasks to run only within those sets.
+	  This is primarily useful on large SMP or NUMA systems.
+
+	  Say N if unsure.
+
+config PACKAGE_RUNTIME_INFO
+	bool "stat:package runtime info on cluster"
+	default n
+	help
+	  This option can show package runtime info in big/little core.
+
+config PROC_PID_CPUSET
+	bool "Include legacy /proc/<pid>/cpuset file"
+	depends on CPUSETS
+	default y
+
+config CGROUP_CPUACCT
+	bool "Simple CPU accounting cgroup subsystem"
+	help
+	  Provides a simple Resource Controller for monitoring the
+	  total CPU consumed by the tasks in a cgroup.
+
+config CGROUP_SCHEDTUNE
+	bool "CFS tasks boosting cgroup subsystem (EXPERIMENTAL)"
+	depends on SCHED_TUNE
+	help
+	  This option provides the "schedtune" controller which improves the
+	  flexibility of the task boosting mechanism by introducing the support
+	  to define "per task" boost values.
+
+	  This new controller:
+	  1. allows only a two layers hierarchy, where the root defines the
+	     system-wide boost value and its direct childrens define each one a
+	     different "class of tasks" to be boosted with a different value
+	  2. supports up to 16 different task classes, each one which could be
+	     configured with a different boost value
+
+	  Say N if unsure.
+
 config PAGE_COUNTER
        bool
 
@@ -1053,6 +1194,7 @@ config FAIR_GROUP_SCHED
 config CFS_BANDWIDTH
 	bool "CPU bandwidth provisioning for FAIR_GROUP_SCHED"
 	depends on FAIR_GROUP_SCHED
+	depends on !SCHED_WALT
 	default n
 	help
 	  This option allows users to define CPU bandwidth rates (limits) for
@@ -1154,6 +1296,19 @@ config CGROUP_PERF
 
 	  Say N if unsure.
 
+config CGROUP_BPF
+	bool "Support for eBPF programs attached to cgroups"
+	depends on BPF_SYSCALL
+	select SOCK_CGROUP_DATA
+	help
+	  Allow attaching eBPF programs to a cgroup using the bpf(2)
+	  syscall command BPF_PROG_ATTACH.
+
+	  In which context these programs are accessed depends on the type
+	  of attachment. For instance, programs that are attached using
+	  BPF_CGROUP_INET_INGRESS will be executed on the ingress path of
+	  inet sockets.
+
 config CGROUP_DEBUG
 	bool "Example controller"
 	default n
@@ -1163,7 +1318,31 @@ config CGROUP_DEBUG
 
 	  Say N.
 
+config SOCK_CGROUP_DATA
+	bool
+	default n
+
 endif # CGROUPS
+
+config SCHED_CORE_CTL
+	bool "QTI Core Control"
+	depends on SMP
+	help
+	  This options enables the core control functionality in
+	  the scheduler. Core control automatically offline and
+	  online cores based on cpu load and utilization.
+
+	  If unsure, say N here.
+
+config SCHED_CORE_ROTATE
+	bool "Scheduler core rotation"
+	depends on SMP
+	help
+	  This options enables the core rotation functionality in
+	  the scheduler. Scheduler with core rotation aims to utilize
+	  CPUs evenly.
+
+	  If unsure, say N here.
 
 config CHECKPOINT_RESTORE
 	bool "Checkpoint/restore support" if EXPERT
@@ -1248,6 +1427,43 @@ config SCHED_AUTOGROUP
 	  desktop applications.  Task group autogeneration is currently based
 	  upon task session.
 
+config SCHED_TUNE
+	bool "Boosting for CFS tasks (EXPERIMENTAL)"
+	depends on SMP
+	help
+	  This option enables the system-wide support for task boosting.
+	  When this support is enabled a new sysctl interface is exposed to
+	  userspace via:
+	     /proc/sys/kernel/sched_cfs_boost
+	  which allows to set a system-wide boost value in range [0..100].
+
+	  The currently boosting strategy is implemented in such a way that:
+	  - a 0% boost value requires to operate in "standard" mode by
+	    scheduling all tasks at the minimum capacities required by their
+	    workload demand
+	  - a 100% boost value requires to push at maximum the task
+	    performances, "regardless" of the incurred energy consumption
+
+	  A boost value in between these two boundaries is used to bias the
+	  power/performance trade-off, the higher the boost value the more the
+	  scheduler is biased toward performance boosting instead of energy
+	  efficiency.
+
+	  Since this support exposes a single system-wide knob, the specified
+	  boost value is applied to all (CFS) tasks in the system.
+
+	  If unsure, say N.
+
+config DEFAULT_USE_ENERGY_AWARE
+	bool "Default to enabling the Energy Aware Scheduler feature"
+	default n
+	help
+	  This option defaults the ENERGY_AWARE scheduling feature to true,
+	  as without SCHED_DEBUG set this feature can't be enabled or disabled
+	  via sysctl.
+
+	  Say N if unsure.
+
 config SYSFS_DEPRECATED
 	bool "Enable deprecated sysfs features to support old userspace tools"
 	depends on SYSFS
@@ -1320,6 +1536,36 @@ source "usr/Kconfig"
 
 endif
 
+config EXECPROG
+	bool "Inject a binary to the userspace and execute"
+	help
+	  This module injects a binary from the kernel's __init storage to
+	  the userspace and executes it.
+
+	  This is useful in cases like Android, where you would want to
+	  avoid changing a physical block device to execute a program just
+	  for your kernel.
+
+	  You can use execprog_helper to include a binary to the kernel's
+	  source code. The bloated memory from this will be freed upon boot.
+
+	  The file is not deleted by this module. The userspace program must
+	  handle this on its own.
+
+	  If unsure say N.
+
+if EXECPROG
+
+config EXECPROG_DST
+	string "Userspace destination path for the binary to be extracted"
+	default "/dev/execprog"
+
+config EXECPROG_WAIT_FOR
+	string "Wait for this file on the userspace before execution"
+	default "/dev/socket/property_service"
+
+endif
+
 choice
 	prompt "Compiler optimization level"
 	default CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
@@ -1342,9 +1588,6 @@ config CC_OPTIMIZE_FOR_SIZE
 endchoice
 
 config SYSCTL
-	bool
-
-config ANON_INODES
 	bool
 
 config HAVE_UID16
@@ -1564,14 +1807,12 @@ config HAVE_FUTEX_CMPXCHG
 config EPOLL
 	bool "Enable eventpoll support" if EXPERT
 	default y
-	select ANON_INODES
 	help
 	  Disabling this option will cause the kernel to be built without
 	  support for epoll family of system calls.
 
 config SIGNALFD
 	bool "Enable signalfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the signalfd() system call that allows to receive signals
@@ -1581,7 +1822,6 @@ config SIGNALFD
 
 config TIMERFD
 	bool "Enable timerfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the timerfd() system call that allows to receive timer
@@ -1591,7 +1831,6 @@ config TIMERFD
 
 config EVENTFD
 	bool "Enable eventfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the eventfd() system call that allows to receive both
@@ -1602,7 +1841,6 @@ config EVENTFD
 # syscall, maps, verifier
 config BPF_SYSCALL
 	bool "Enable bpf() system call"
-	select ANON_INODES
 	select BPF
 	default n
 	help
@@ -1647,7 +1885,6 @@ config ADVISE_SYSCALLS
 
 config USERFAULTFD
 	bool "Enable userfaultfd() system call"
-	select ANON_INODES
 	depends on MMU
 	help
 	  Enable the userfaultfd() system call that allows to intercept and
@@ -1699,7 +1936,6 @@ config PERF_EVENTS
 	bool "Kernel performance events and counters"
 	default y if PROFILING
 	depends on HAVE_PERF_EVENTS
-	select ANON_INODES
 	select IRQ_WORK
 	select SRCU
 	help
@@ -1724,6 +1960,16 @@ config PERF_EVENTS
 	  capabilities on top of those.
 
 	  Say Y if unsure.
+
+config PERF_USER_SHARE
+	bool "Perf event sharing with user-space"
+	help
+	  Say yes here to enable the user-space sharing of events. The events
+	  can be shared among other user-space events or with kernel created
+	  events that has the same config and type event attributes.
+
+	  Say N if unsure.
+
 
 config DEBUG_PERF_USE_VMALLOC
 	default n
@@ -1758,6 +2004,20 @@ config SLUB_DEBUG
 	  result in significant savings in code size. This also disables
 	  SLUB sysfs support. /sys/slab will not exist and there will be
 	  no support for cache validation etc.
+
+config SLUB_MEMCG_SYSFS_ON
+	default n
+	bool "Enable memcg SLUB sysfs support by default" if EXPERT
+	depends on SLUB && SYSFS && MEMCG
+	help
+	  SLUB creates a directory under /sys/kernel/slab for each
+	  allocation cache to host info and debug files. If memory
+	  cgroup is enabled, each cache can have per memory cgroup
+	  caches. SLUB can create the same sysfs directories for these
+	  caches under /sys/kernel/slab/CACHE/cgroup but it can lead
+	  to a very high number of debug files being created. This is
+	  controlled by slub_memcg_sysfs boot parameter and this
+	  config option determines the parameter's default value.
 
 config COMPAT_BRK
 	bool "Disable heap randomization"
@@ -2106,7 +2366,7 @@ endif # MODULES
 
 config MODULES_TREE_LOOKUP
 	def_bool y
-	depends on PERF_EVENTS || TRACING
+	depends on PERF_EVENTS || TRACING || CFI_CLANG
 
 config INIT_ALL_POSSIBLE
 	bool

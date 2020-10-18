@@ -8,6 +8,7 @@ obj-$(CONFIG_OF) += of_regulator.o
 obj-$(CONFIG_REGULATOR_FIXED_VOLTAGE) += fixed.o
 obj-$(CONFIG_REGULATOR_VIRTUAL_CONSUMER) += virtual.o
 obj-$(CONFIG_REGULATOR_USERSPACE_CONSUMER) += userspace-consumer.o
+obj-$(CONFIG_REGULATOR_PROXY_CONSUMER) += proxy-consumer.o
 
 obj-$(CONFIG_REGULATOR_88PM800) += 88pm800.o
 obj-$(CONFIG_REGULATOR_88PM8607) += 88pm8607.o
@@ -112,6 +113,25 @@ obj-$(CONFIG_REGULATOR_WM831X) += wm831x-ldo.o
 obj-$(CONFIG_REGULATOR_WM8350) += wm8350-regulator.o
 obj-$(CONFIG_REGULATOR_WM8400) += wm8400-regulator.o
 obj-$(CONFIG_REGULATOR_WM8994) += wm8994-regulator.o
+obj-$(CONFIG_REGULATOR_RPM_SMD) += rpm-smd-regulator.o
+obj-$(CONFIG_REGULATOR_SPM) += spm-regulator.o
 
+obj-$(CONFIG_REGULATOR_CPR) += cpr-regulator.o
+obj-$(CONFIG_REGULATOR_CPR3) += cpr3-regulator.o cpr3-util.o
+obj-$(CONFIG_REGULATOR_CPR3_HMSS) += cpr3-hmss-regulator.o
+obj-$(CONFIG_REGULATOR_CPR3_MMSS) += cpr3-mmss-regulator.o
+obj-$(CONFIG_REGULATOR_CPR4_APSS) += cpr4-apss-regulator.o
+obj-$(CONFIG_REGULATOR_CPR4_MMSS_LDO) += cpr4-mmss-ldo-regulator.o
+obj-$(CONFIG_REGULATOR_CPRH_KBSS) += cprh-kbss-regulator.o
+obj-$(CONFIG_REGULATOR_KRYO) += kryo-regulator.o
+obj-$(CONFIG_REGULATOR_MEM_ACC) += mem-acc-regulator.o
+obj-$(CONFIG_REGULATOR_MSM_GFX_LDO) += msm_gfx_ldo.o
+obj-$(CONFIG_REGULATOR_QPNP_LABIBB) += qpnp-labibb-regulator.o
+obj-$(CONFIG_REGULATOR_QPNP_LCDB) += qpnp-lcdb-regulator.o
+obj-$(CONFIG_REGULATOR_QPNP_OLEDB) += qpnp-oledb-regulator.o
+obj-$(CONFIG_REGULATOR_QPNP) += qpnp-regulator.o
+obj-$(CONFIG_REGULATOR_REFGEN) += refgen.o
+obj-$(CONFIG_REGULATOR_RPMH) += rpmh-regulator.o
+obj-$(CONFIG_REGULATOR_STUB) += stub-regulator.o
 
 ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG

@@ -80,7 +80,7 @@ again:
  * down, but we are still initializing the system.  Pages are given directly
  * to the page allocator, no bootmem metadata is updated because it is gone.
  */
-void __init free_bootmem_late(unsigned long addr, unsigned long size)
+void free_bootmem_late(unsigned long addr, unsigned long size)
 {
 	unsigned long cursor, end;
 
@@ -91,7 +91,7 @@ void __init free_bootmem_late(unsigned long addr, unsigned long size)
 
 	for (; cursor < end; cursor++) {
 		__free_pages_bootmem(pfn_to_page(cursor), cursor, 0);
-		totalram_pages++;
+		totalram_pages_inc();
 	}
 }
 
@@ -184,7 +184,7 @@ unsigned long __init free_all_bootmem(void)
 	reset_all_zones_managed_pages();
 
 	pages = free_low_memory_core_early();
-	totalram_pages += pages;
+	totalram_pages_add(pages);
 
 	return pages;
 }

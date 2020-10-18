@@ -982,6 +982,9 @@ static int check_fmt(struct file *file, enum v4l2_buf_type type)
 		if (is_sdr && is_tx && ops->vidioc_g_fmt_sdr_out)
 			return 0;
 		break;
+	case V4L2_BUF_TYPE_PRIVATE:
+		if (ops->vidioc_g_fmt_type_private)
+			return 0;
 	default:
 		break;
 	}
@@ -1244,10 +1247,90 @@ static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
 	case V4L2_SDR_FMT_CS8:		descr = "Complex S8"; break;
 	case V4L2_SDR_FMT_CS14LE:	descr = "Complex S14LE"; break;
 	case V4L2_SDR_FMT_RU12LE:	descr = "Real U12LE"; break;
-	case V4L2_TCH_FMT_DELTA_TD16:	descr = "16-bit signed deltas"; break;
-	case V4L2_TCH_FMT_DELTA_TD08:	descr = "8-bit signed deltas"; break;
-	case V4L2_TCH_FMT_TU16:		descr = "16-bit unsigned touch data"; break;
-	case V4L2_TCH_FMT_TU08:		descr = "8-bit unsigned touch data"; break;
+	case V4L2_PIX_FMT_NV12_UBWC:
+		descr = "NV12 UBWC"; break;
+	case V4L2_PIX_FMT_RGBA8888_UBWC:
+		descr = "RGBA8888 UBWC"; break;
+	case V4L2_PIX_FMT_SDE_ABGR_8888:
+					descr = "32-bit ABGR 8-8-8-8"; break;
+	case V4L2_PIX_FMT_SDE_RGBA_8888:
+					descr = "32-bit RGBA 8-8-8-8"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_8888:
+					descr = "32-bit RGBX 8-8-8-8"; break;
+	case V4L2_PIX_FMT_SDE_XBGR_8888:
+					descr = "32-bit XBGR 8-8-8-8"; break;
+	case V4L2_PIX_FMT_SDE_RGBA_5551:
+					descr = "16-bit RGBA 5-5-5-1"; break;
+	case V4L2_PIX_FMT_SDE_ABGR_1555:
+					descr = "16-bit ABGR 1-5-5-5"; break;
+	case V4L2_PIX_FMT_SDE_BGRA_5551:
+					descr = "16-bit BGRA 5-5-5-1"; break;
+	case V4L2_PIX_FMT_SDE_BGRX_5551:
+					descr = "16-bit BGRX 5-5-5-1"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_5551:
+					descr = "16-bit RGBX 5-5-5-1"; break;
+	case V4L2_PIX_FMT_SDE_XBGR_1555:
+					descr = "16-bit XBGR 1-5-5-5"; break;
+	case V4L2_PIX_FMT_SDE_RGBA_4444:
+					descr = "16-bit RGBA 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_BGRA_4444:
+					descr = "16-bit BGRA 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_ABGR_4444:
+					descr = "16-bit ABGR 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_4444:
+					descr = "16-bit RGBX 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_BGRX_4444:
+					descr = "16-bit BGRX 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_XBGR_4444:
+					descr = "16-bit XBGR 4-4-4-4"; break;
+	case V4L2_PIX_FMT_SDE_BGR_565:
+					descr = "16-bit BGR 5-6-5"; break;
+	case V4L2_PIX_FMT_SDE_Y_CR_CB_GH2V2:
+					descr = "Planar YVU 4:2:0 A16"; break;
+	case V4L2_PIX_FMT_SDE_Y_CBCR_H1V2:
+					descr = "Y/CbCr 4:2:2"; break;
+	case V4L2_PIX_FMT_SDE_Y_CRCB_H1V2:
+					descr = "Y/CrCb 4:2:2"; break;
+	case V4L2_PIX_FMT_SDE_Y_CBCR_H2V2_VENUS:
+					descr = "Y/CbCr 4:2:0 Venus"; break;
+	case V4L2_PIX_FMT_SDE_Y_CRCB_H2V2_VENUS:
+					descr = "Y/CrCb 4:2:0 Venus"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_8888_UBWC:
+					descr = "RGBX 8:8:8:8 UBWC"; break;
+	case V4L2_PIX_FMT_SDE_RGB_565_UBWC:
+					descr = "RGB 5:6:5 UBWC"; break;
+	case V4L2_PIX_FMT_SDE_RGBA_1010102:
+					descr = "RGBA 10:10:10:2"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_1010102:
+					descr = "RGBX 10:10:10:2"; break;
+	case V4L2_PIX_FMT_SDE_ARGB_2101010:
+					descr = "ARGB 2:10:10:10"; break;
+	case V4L2_PIX_FMT_SDE_XRGB_2101010:
+					descr = "XRGB 2:10:10:10"; break;
+	case V4L2_PIX_FMT_SDE_BGRA_1010102:
+					descr = "BGRA 10:10:10:2"; break;
+	case V4L2_PIX_FMT_SDE_BGRX_1010102:
+					descr = "BGRX 10:10:10:2"; break;
+	case V4L2_PIX_FMT_SDE_ABGR_2101010:
+					descr = "ABGR 2:10:10:10"; break;
+	case V4L2_PIX_FMT_SDE_XBGR_2101010:
+					descr = "XBGR 2:10:10:10"; break;
+	case V4L2_PIX_FMT_SDE_RGBA_1010102_UBWC:
+					descr = "RGBA 10:10:10:2 UBWC"; break;
+	case V4L2_PIX_FMT_SDE_RGBX_1010102_UBWC:
+					descr = "RGBX 10:10:10:2 UBWC"; break;
+	case V4L2_PIX_FMT_SDE_Y_CBCR_H2V2_TP10:
+					descr = "Y/CbCr 4:2:0 TP10"; break;
+	case V4L2_PIX_FMT_SDE_Y_CBCR_H2V2_P010:
+					descr = "Y/CbCr 4:2:0 P10"; break;
+	case V4L2_PIX_FMT_SDE_Y_CBCR_H2V2_P010_VENUS:
+					descr = "Y/CbCr 4:2:0 P10 Venus"; break;
+	case V4L2_PIX_FMT_NV12_TP10_UBWC:
+					descr = "Y/CbCr 4:2:0 TP10 UBWC"; break;
+	case V4L2_PIX_FMT_NV12_P010_UBWC:
+					descr = "Y/CbCr 4:2:0 P010 UBWC"; break;
+	case V4L2_PIX_FMT_NV12_512:
+				descr = "Y/CbCr 4:2:0 (512 align)"; break;
 
 	default:
 		/* Compressed formats */
@@ -1287,6 +1370,18 @@ static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
 		case V4L2_PIX_FMT_JPGL:		descr = "JPEG Lite"; break;
 		case V4L2_PIX_FMT_SE401:	descr = "GSPCA SE401"; break;
 		case V4L2_PIX_FMT_S5C_UYVY_JPG:	descr = "S5C73MX interleaved UYVY/JPEG"; break;
+		case V4L2_PIX_FMT_HEVC:
+			descr = "HEVC"; break;
+		case V4L2_PIX_FMT_VP9:
+			descr = "VP9"; break;
+		case V4L2_PIX_FMT_TME:
+			descr = "TME"; break;
+		case V4L2_PIX_FMT_HEVC_HYBRID:
+			descr = "HEVC Hybrid"; break;
+		case V4L2_PIX_FMT_DIVX_311:
+			descr = "DIVX311"; break;
+		case V4L2_PIX_FMT_DIVX:
+			descr = "DIVX"; break;
 		default:
 			WARN(1, "Unknown pixelformat 0x%08x\n", fmt->pixelformat);
 			if (fmt->description[0])
@@ -2470,11 +2565,8 @@ struct v4l2_ioctl_info {
 	unsigned int ioctl;
 	u32 flags;
 	const char * const name;
-	union {
-		u32 offset;
-		int (*func)(const struct v4l2_ioctl_ops *ops,
-				struct file *file, void *fh, void *p);
-	} u;
+	int (*func)(const struct v4l2_ioctl_ops *ops, struct file *file,
+		    void *fh, void *p);
 	void (*debug)(const void *arg, bool write_only);
 };
 
@@ -2482,25 +2574,21 @@ struct v4l2_ioctl_info {
 #define INFO_FL_PRIO	(1 << 0)
 /* This control can be valid if the filehandle passes a control handler. */
 #define INFO_FL_CTRL	(1 << 1)
-/* This is a standard ioctl, no need for special code */
-#define INFO_FL_STD	(1 << 2)
 /* This is ioctl has its own function */
-#define INFO_FL_FUNC	(1 << 3)
+#define INFO_FL_FUNC	(1 << 2)
 /* Queuing ioctl */
-#define INFO_FL_QUEUE	(1 << 4)
+#define INFO_FL_QUEUE	(1 << 3)
 /* Zero struct from after the field to the end */
 #define INFO_FL_CLEAR(v4l2_struct, field)			\
 	((offsetof(struct v4l2_struct, field) +			\
 	  sizeof(((struct v4l2_struct *)0)->field)) << 16)
 #define INFO_FL_CLEAR_MASK (_IOC_SIZEMASK << 16)
 
-#define IOCTL_INFO_STD(_ioctl, _vidioc, _debug, _flags)			\
-	[_IOC_NR(_ioctl)] = {						\
-		.ioctl = _ioctl,					\
-		.flags = _flags | INFO_FL_STD,				\
-		.name = #_ioctl,					\
-		.u.offset = offsetof(struct v4l2_ioctl_ops, _vidioc),	\
-		.debug = _debug,					\
+#define DEFINE_IOCTL_STD_FNC(_vidioc) \
+	static int __v4l_ ## _vidioc ## _fnc(				\
+			const struct v4l2_ioctl_ops *ops, 		\
+			struct file *file, void *fh, void *p) {		\
+		return ops->_vidioc(file, fh, p); 			\
 	}
 
 #define IOCTL_INFO_FNC(_ioctl, _func, _debug, _flags)			\
@@ -2508,9 +2596,43 @@ struct v4l2_ioctl_info {
 		.ioctl = _ioctl,					\
 		.flags = _flags | INFO_FL_FUNC,				\
 		.name = #_ioctl,					\
-		.u.func = _func,					\
+		.func = _func,						\
 		.debug = _debug,					\
 	}
+
+#define IOCTL_INFO_STD(_ioctl, _vidioc, _debug, _flags)	\
+	IOCTL_INFO_FNC(_ioctl, __v4l_ ## _vidioc ## _fnc, _debug, _flags)
+
+DEFINE_IOCTL_STD_FNC(vidioc_g_fbuf)
+DEFINE_IOCTL_STD_FNC(vidioc_s_fbuf)
+DEFINE_IOCTL_STD_FNC(vidioc_expbuf)
+DEFINE_IOCTL_STD_FNC(vidioc_g_std)
+DEFINE_IOCTL_STD_FNC(vidioc_g_audio)
+DEFINE_IOCTL_STD_FNC(vidioc_s_audio)
+DEFINE_IOCTL_STD_FNC(vidioc_g_input)
+DEFINE_IOCTL_STD_FNC(vidioc_g_edid)
+DEFINE_IOCTL_STD_FNC(vidioc_s_edid)
+DEFINE_IOCTL_STD_FNC(vidioc_g_output)
+DEFINE_IOCTL_STD_FNC(vidioc_g_audout)
+DEFINE_IOCTL_STD_FNC(vidioc_s_audout)
+DEFINE_IOCTL_STD_FNC(vidioc_g_selection)
+DEFINE_IOCTL_STD_FNC(vidioc_s_selection)
+DEFINE_IOCTL_STD_FNC(vidioc_g_jpegcomp)
+DEFINE_IOCTL_STD_FNC(vidioc_s_jpegcomp)
+DEFINE_IOCTL_STD_FNC(vidioc_enumaudio)
+DEFINE_IOCTL_STD_FNC(vidioc_enumaudout)
+DEFINE_IOCTL_STD_FNC(vidioc_enum_framesizes)
+DEFINE_IOCTL_STD_FNC(vidioc_enum_frameintervals)
+DEFINE_IOCTL_STD_FNC(vidioc_g_enc_index)
+DEFINE_IOCTL_STD_FNC(vidioc_encoder_cmd)
+DEFINE_IOCTL_STD_FNC(vidioc_try_encoder_cmd)
+DEFINE_IOCTL_STD_FNC(vidioc_decoder_cmd)
+DEFINE_IOCTL_STD_FNC(vidioc_try_decoder_cmd)
+DEFINE_IOCTL_STD_FNC(vidioc_s_dv_timings)
+DEFINE_IOCTL_STD_FNC(vidioc_g_dv_timings)
+DEFINE_IOCTL_STD_FNC(vidioc_enum_dv_timings)
+DEFINE_IOCTL_STD_FNC(vidioc_query_dv_timings)
+DEFINE_IOCTL_STD_FNC(vidioc_dv_timings_cap)
 
 static struct v4l2_ioctl_info v4l2_ioctls[] = {
 	IOCTL_INFO_FNC(VIDIOC_QUERYCAP, v4l_querycap, v4l_print_querycap, 0),
@@ -2696,14 +2818,8 @@ static long __video_do_ioctl(struct file *file,
 	}
 
 	write_only = _IOC_DIR(cmd) == _IOC_WRITE;
-	if (info->flags & INFO_FL_STD) {
-		typedef int (*vidioc_op)(struct file *file, void *fh, void *p);
-		const void *p = vfd->ioctl_ops;
-		const vidioc_op *vidioc = p + info->u.offset;
-
-		ret = (*vidioc)(file, fh, arg);
-	} else if (info->flags & INFO_FL_FUNC) {
-		ret = info->u.func(ops, file, fh, arg);
+	if (info->flags & INFO_FL_FUNC) {
+		ret = info->func(ops, file, fh, arg);
 	} else if (!ops->vidioc_default) {
 		ret = -ENOTTY;
 	} else {
@@ -2803,7 +2919,8 @@ long
 video_usercopy(struct file *file, unsigned int cmd, unsigned long arg,
 	       v4l2_kioctl func)
 {
-	char	sbuf[128];
+	char	sbuf[SZ_4K] __aligned(8);
+	char    mbuf_onstack[SZ_512] __aligned(8);
 	void    *mbuf = NULL;
 	void	*parg = (void *)arg;
 	long	err  = -EINVAL;
@@ -2865,10 +2982,14 @@ video_usercopy(struct file *file, unsigned int cmd, unsigned long arg,
 		 * array) fits into sbuf (so that mbuf will still remain
 		 * unused up to here).
 		 */
-		mbuf = kmalloc(array_size, GFP_KERNEL);
-		err = -ENOMEM;
-		if (NULL == mbuf)
-			goto out_array_args;
+		if (array_size <= ARRAY_SIZE(mbuf_onstack)) {
+			mbuf = mbuf_onstack;
+		} else {
+			mbuf = kmalloc(array_size, GFP_KERNEL);
+			err = -ENOMEM;
+			if (NULL == mbuf)
+				goto out_array_args;
+		}
 		err = -EFAULT;
 		if (copy_from_user(mbuf, user_ptr, array_size))
 			goto out_array_args;
@@ -2911,7 +3032,8 @@ out_array_args:
 	}
 
 out:
-	kfree(mbuf);
+	if (mbuf != mbuf_onstack)
+		kfree(mbuf);
 	return err;
 }
 EXPORT_SYMBOL(video_usercopy);

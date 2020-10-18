@@ -6,9 +6,9 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/scatterlist.h>
-
+#include <linux/pfk.h>
 #include <trace/events/block.h>
-
+#include <linux/pfk.h>
 #include "blk.h"
 
 static struct bio *blk_bio_discard_split(struct request_queue *q,
@@ -486,6 +486,64 @@ int blk_rq_map_sg(struct request_queue *q, struct request *rq,
 }
 EXPORT_SYMBOL(blk_rq_map_sg);
 
+/*
+ * map a request to scatterlist without combining PHY CONT
+ * blocks, return number of sg entries setup. Caller
+ * must make sure sg can hold rq->nr_phys_segments entries
+ */
+int blk_rq_map_sg_no_cluster(struct request_queue *q, struct request *rq,
+		  struct scatterlist *sglist)
+{
+	struct bio_vec bvec, bvprv = { NULL };
+	struct req_iterator iter;
+	struct scatterlist *sg;
+	int nsegs, cluster = 0;
+
+	nsegs = 0;
+
+	/*
+	 * for each bio in rq
+	 */
+	sg = NULL;
+	rq_for_each_segment(bvec, rq, iter) {
+		__blk_segment_map_sg(q, &bvec, sglist, &bvprv, &sg,
+				     &nsegs, &cluster);
+	} /* segments in rq */
+
+
+	if (!sg)
+		return nsegs;
+
+	if (unlikely(rq->cmd_flags & REQ_COPY_USER) &&
+	    (blk_rq_bytes(rq) & q->dma_pad_mask)) {
+		unsigned int pad_len =
+			(q->dma_pad_mask & ~blk_rq_bytes(rq)) + 1;
+
+		sg->length += pad_len;
+		rq->extra_len += pad_len;
+	}
+
+	if (q->dma_drain_size && q->dma_drain_needed(rq)) {
+		if (rq->cmd_flags & REQ_OP_WRITE)
+			memset(q->dma_drain_buffer, 0, q->dma_drain_size);
+
+		sg->page_link &= ~0x02;
+		sg = sg_next(sg);
+		sg_set_page(sg, virt_to_page(q->dma_drain_buffer),
+			    q->dma_drain_size,
+			    ((unsigned long)q->dma_drain_buffer) &
+			    (PAGE_SIZE - 1));
+		nsegs++;
+		rq->extra_len += q->dma_drain_size;
+	}
+
+	if (sg)
+		sg_mark_end(sg);
+
+	return nsegs;
+}
+EXPORT_SYMBOL(blk_rq_map_sg_no_cluster);
+
 static inline int ll_new_hw_segment(struct request_queue *q,
 				    struct request *req,
 				    struct bio *bio)
@@ -661,6 +719,11 @@ static void blk_account_io_merge(struct request *req)
 	}
 }
 
+static bool crypto_not_mergeable(const struct bio *bio, const struct bio *nxt)
+{
+	return (!pfk_allow_merge_bio(bio, nxt));
+}
+
 /*
  * Has to be called with the request spinlock acquired
  */
@@ -688,6 +751,8 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	    !blk_write_same_mergeable(req->bio, next->bio))
 		return 0;
 
+	if (crypto_not_mergeable(req->bio, next->bio))
+		return 0;
 	/*
 	 * If we are allowed to merge, then append bio list
 	 * from next to rq and release next. merge_requests_fn
@@ -798,11 +863,17 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 	    !blk_write_same_mergeable(rq->bio, bio))
 		return false;
 
+	if (crypto_not_mergeable(rq->bio, bio))
+		return false;
 	return true;
 }
 
 int blk_try_merge(struct request *rq, struct bio *bio)
 {
+#ifdef CONFIG_PFK
+	if (blk_rq_dun(rq) || bio_dun(bio))
+		return ELEVATOR_NO_MERGE;
+#endif
 	if (blk_rq_pos(rq) + blk_rq_sectors(rq) == bio->bi_iter.bi_sector)
 		return ELEVATOR_BACK_MERGE;
 	else if (blk_rq_pos(rq) - bio_sectors(bio) == bio->bi_iter.bi_sector)

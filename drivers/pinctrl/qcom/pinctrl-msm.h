@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
+ * Copyright (c) 2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,6 +44,8 @@ struct msm_function {
  * @intr_status_reg:      Offset of the register holding the status bits for this group.
  * @intr_target_reg:      Offset of the register specifying routing of the interrupts
  *                        from this group.
+ * @dir_conn_reg:         Offset of the register specifying direct connect
+ *                        setup of this group.
  * @mux_bit:              Offset in @ctl_reg for the pinmux function selection.
  * @pull_bit:             Offset in @ctl_reg for the bias configuration.
  * @drv_bit:              Offset in @ctl_reg for the drive strength configuration.
@@ -75,6 +78,7 @@ struct msm_pingroup {
 	u32 intr_cfg_reg;
 	u32 intr_status_reg;
 	u32 intr_target_reg;
+	u32 dir_conn_reg;
 
 	unsigned mux_bit:5;
 
@@ -95,6 +99,41 @@ struct msm_pingroup {
 	unsigned intr_polarity_bit:5;
 	unsigned intr_detection_bit:5;
 	unsigned intr_detection_width:5;
+	unsigned dir_conn_en_bit:8;
+};
+
+/**
+ * struct msm_gpio_mux_input - Map GPIO to Mux pin
+ * @mux::	The mux pin to which the GPIO is connected to
+ * @gpio:	GPIO pin number
+ * @init:	Setup PDC connection at probe
+ */
+struct msm_gpio_mux_input {
+	unsigned int mux;
+	unsigned int gpio;
+	bool init;
+};
+
+/**
+ * struct msm_pdc_mux_output - GPIO mux pin to PDC port
+ * @mux:	GPIO mux pin number
+ * @hwirq:	The PDC port (hwirq) that GPIO is connected to
+ */
+struct msm_pdc_mux_output {
+	unsigned int mux;
+	irq_hw_number_t hwirq;
+};
+
+/**
+ * struct msm_dir_conn - Direct GPIO connect configuration
+ * @gpio:	GPIO pin number
+ * @hwirq:	The GIC interrupt that the pin is connected to
+ * @tlmm_dc:	indicates if the GPIO is routed to GIC directly
+ */
+struct msm_dir_conn {
+	unsigned int gpio;
+	irq_hw_number_t hwirq;
+	bool tlmm_dc;
 };
 
 /**
@@ -106,6 +145,14 @@ struct msm_pingroup {
  * @groups:     An array describing all pin groups the pin SoC supports.
  * @ngroups:    The numbmer of entries in @groups.
  * @ngpio:      The number of pingroups the driver should expose as GPIOs.
+ * @dir_conn:   An array describing all the pins directly connected to GIC.
+ * @ndirconns:  The number of pins directly connected to GIC
+ * @dir_conn_irq_base:  Direct connect interrupt base register for kpss.
+ * @gpio_mux_in:	Map of GPIO pin to the hwirq.
+ * @n_gpioc_mux_in:	The number of entries in @pdc_mux_in.
+ * @pdc_mux_out:	Map of GPIO mux to PDC port.
+ * @n_pdc_mux_out:	The number of entries in @pdc_mux_out.
+ * @n_pdc_offset:	The offset for the PDC mux pins
  */
 struct msm_pinctrl_soc_data {
 	const struct pinctrl_pin_desc *pins;
@@ -115,10 +162,24 @@ struct msm_pinctrl_soc_data {
 	const struct msm_pingroup *groups;
 	unsigned ngroups;
 	unsigned ngpios;
+	const struct msm_dir_conn *dir_conn;
+	unsigned int n_dir_conns;
+	unsigned int dir_conn_irq_base;
+	struct msm_pdc_mux_output *pdc_mux_out;
+	unsigned int n_pdc_mux_out;
+	struct msm_gpio_mux_input *gpio_mux_in;
+	unsigned int n_gpio_mux_in;
+	unsigned int n_pdc_mux_offset;
 };
 
 int msm_pinctrl_probe(struct platform_device *pdev,
 		      const struct msm_pinctrl_soc_data *soc_data);
 int msm_pinctrl_remove(struct platform_device *pdev);
+
+#ifdef CONFIG_QCOM_SHOW_RESUME_IRQ
+extern int msm_show_resume_irq_mask;
+#else
+#define msm_show_resume_irq_mask 0
+#endif
 
 #endif

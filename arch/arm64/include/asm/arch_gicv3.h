@@ -21,6 +21,7 @@
 #include <asm/sysreg.h>
 
 #define ICC_EOIR1_EL1			sys_reg(3, 0, 12, 12, 1)
+#define ICC_HPPIR1_EL1			sys_reg(3, 0, 12, 12, 2)
 #define ICC_DIR_EL1			sys_reg(3, 0, 12, 11, 1)
 #define ICC_IAR1_EL1			sys_reg(3, 0, 12, 12, 0)
 #define ICC_SGI1R_EL1			sys_reg(3, 0, 12, 11, 5)
@@ -174,6 +175,7 @@ static inline void gic_write_bpr1(u32 val)
 }
 
 #define gic_read_typer(c)		readq_relaxed(c)
+#define gic_read_irouter(c)		readq_relaxed(c)
 #define gic_write_irouter(v, c)		writeq_relaxed(v, c)
 
 #endif /* __ASSEMBLY__ */

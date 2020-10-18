@@ -129,59 +129,35 @@ static unsigned long sel_last_ino = SEL_INO_NEXT - 1;
 #define SEL_INO_MASK			0x00ffffff
 
 #define TMPBUFLEN	12
+static int enforcing_status = 1;
 static ssize_t sel_read_enforce(struct file *filp, char __user *buf,
 				size_t count, loff_t *ppos)
 {
 	char tmpbuf[TMPBUFLEN];
 	ssize_t length;
 
-	length = scnprintf(tmpbuf, TMPBUFLEN, "%d", selinux_enforcing);
+	length = scnprintf(tmpbuf, TMPBUFLEN, "%d", enforcing_status);
 	return simple_read_from_buffer(buf, count, ppos, tmpbuf, length);
 }
+
+static int __init selinux_permissive_param(char *str)
+{
+	if (*str)
+		return 0;
+
+	enforcing_status = 0;
+	pr_info("selinux: ROM requested to be permissive, disabling spoofing\n");
+
+	return 1;
+}
+__setup("androidboot.selinux=permissive", selinux_permissive_param);
 
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
 static ssize_t sel_write_enforce(struct file *file, const char __user *buf,
 				 size_t count, loff_t *ppos)
 
 {
-	char *page = NULL;
-	ssize_t length;
-	int new_value;
-
-	if (count >= PAGE_SIZE)
-		return -ENOMEM;
-
-	/* No partial writes. */
-	if (*ppos != 0)
-		return -EINVAL;
-
-	page = memdup_user_nul(buf, count);
-	if (IS_ERR(page))
-		return PTR_ERR(page);
-
-	length = -EINVAL;
-	if (sscanf(page, "%d", &new_value) != 1)
-		goto out;
-
-	if (new_value != selinux_enforcing) {
-		length = task_has_security(current, SECURITY__SETENFORCE);
-		if (length)
-			goto out;
-		audit_log(current->audit_context, GFP_KERNEL, AUDIT_MAC_STATUS,
-			"enforcing=%d old_enforcing=%d auid=%u ses=%u",
-			new_value, selinux_enforcing,
-			from_kuid(&init_user_ns, audit_get_loginuid(current)),
-			audit_get_sessionid(current));
-		selinux_enforcing = new_value;
-		if (selinux_enforcing)
-			avc_ss_reset(0);
-		selnl_notify_setenforce(selinux_enforcing);
-		selinux_status_update_setenforce(selinux_enforcing);
-	}
-	length = count;
-out:
-	kfree(page);
-	return length;
+	return count;
 }
 #else
 #define sel_write_enforce NULL
@@ -555,7 +531,8 @@ static const struct file_operations sel_load_ops = {
 
 static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 {
-	char *canon = NULL;
+	char *canon;
+	char canon_buf[SELINUX_LABEL_LENGTH];
 	u32 sid, len;
 	ssize_t length;
 
@@ -567,7 +544,9 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
-	length = security_sid_to_context(sid, &canon, &len);
+	canon = canon_buf;
+
+	length = security_sid_to_context_stack(sid, &canon, &len);
 	if (length)
 		goto out;
 
@@ -581,7 +560,6 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 	memcpy(buf, canon, len);
 	length = len;
 out:
-	kfree(canon);
 	return length;
 }
 
@@ -816,7 +794,8 @@ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
 	u32 ssid, tsid, newsid;
 	u16 tclass;
 	ssize_t length;
-	char *newcon = NULL;
+	char *newcon;
+	char newcon_buf[SELINUX_LABEL_LENGTH];
 	u32 len;
 	int nargs;
 
@@ -887,7 +866,8 @@ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
-	length = security_sid_to_context(newsid, &newcon, &len);
+	newcon = newcon_buf;
+	length = security_sid_to_context_stack(newsid, &newcon, &len);
 	if (length)
 		goto out;
 
@@ -901,7 +881,6 @@ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
 	memcpy(buf, newcon, len);
 	length = len;
 out:
-	kfree(newcon);
 	kfree(namebuf);
 	kfree(tcon);
 	kfree(scon);
@@ -914,7 +893,8 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size)
 	u32 ssid, tsid, newsid;
 	u16 tclass;
 	ssize_t length;
-	char *newcon = NULL;
+	char *newcon;
+	char newcon_buf[SELINUX_LABEL_LENGTH];
 	u32 len;
 
 	length = task_has_security(current, SECURITY__COMPUTE_RELABEL);
@@ -947,7 +927,8 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
-	length = security_sid_to_context(newsid, &newcon, &len);
+	newcon = newcon_buf;
+	length = security_sid_to_context_stack(newsid, &newcon, &len);
 	if (length)
 		goto out;
 
@@ -958,7 +939,6 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size)
 	memcpy(buf, newcon, len);
 	length = len;
 out:
-	kfree(newcon);
 	kfree(tcon);
 	kfree(scon);
 	return length;
@@ -970,6 +950,7 @@ static ssize_t sel_write_user(struct file *file, char *buf, size_t size)
 	u32 sid, *sids = NULL;
 	ssize_t length;
 	char *newcon;
+	char newcon_buf[SELINUX_LABEL_LENGTH];
 	int i, rc;
 	u32 len, nsids;
 
@@ -1001,19 +982,18 @@ static ssize_t sel_write_user(struct file *file, char *buf, size_t size)
 
 	length = sprintf(buf, "%u", nsids) + 1;
 	ptr = buf + length;
+	newcon = newcon_buf;
 	for (i = 0; i < nsids; i++) {
-		rc = security_sid_to_context(sids[i], &newcon, &len);
+		rc = security_sid_to_context_stack(sids[i], &newcon, &len);
 		if (rc) {
 			length = rc;
 			goto out;
 		}
 		if ((length + len) >= SIMPLE_TRANSACTION_LIMIT) {
-			kfree(newcon);
 			length = -ERANGE;
 			goto out;
 		}
 		memcpy(ptr, newcon, len);
-		kfree(newcon);
 		ptr += len;
 		length += len;
 	}
@@ -1030,7 +1010,8 @@ static ssize_t sel_write_member(struct file *file, char *buf, size_t size)
 	u32 ssid, tsid, newsid;
 	u16 tclass;
 	ssize_t length;
-	char *newcon = NULL;
+	char *newcon;
+	char newcon_buf[SELINUX_LABEL_LENGTH];
 	u32 len;
 
 	length = task_has_security(current, SECURITY__COMPUTE_MEMBER);
@@ -1063,7 +1044,9 @@ static ssize_t sel_write_member(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
-	length = security_sid_to_context(newsid, &newcon, &len);
+	newcon = newcon_buf;
+
+	length = security_sid_to_context_stack(newsid, &newcon, &len);
 	if (length)
 		goto out;
 
@@ -1077,7 +1060,6 @@ static ssize_t sel_write_member(struct file *file, char *buf, size_t size)
 	memcpy(buf, newcon, len);
 	length = len;
 out:
-	kfree(newcon);
 	kfree(tcon);
 	kfree(scon);
 	return length;
@@ -1511,16 +1493,17 @@ static ssize_t sel_read_initcon(struct file *file, char __user *buf,
 				size_t count, loff_t *ppos)
 {
 	char *con;
+	char con_buf[SELINUX_LABEL_LENGTH];
 	u32 sid, len;
 	ssize_t ret;
 
 	sid = file_inode(file)->i_ino&SEL_INO_MASK;
-	ret = security_sid_to_context(sid, &con, &len);
+	con = con_buf;
+	ret = security_sid_to_context_stack(sid, &con, &len);
 	if (ret)
 		return ret;
 
 	ret = simple_read_from_buffer(buf, count, ppos, con, len);
-	kfree(con);
 	return ret;
 }
 

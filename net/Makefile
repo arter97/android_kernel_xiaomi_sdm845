@@ -14,6 +14,7 @@ obj-$(CONFIG_NET)		+= $(tmp-y)
 obj-$(CONFIG_LLC)		+= llc/
 obj-$(CONFIG_NET)		+= ethernet/ 802/ sched/ netlink/
 obj-$(CONFIG_NETFILTER)		+= netfilter/
+obj-$(CONFIG_WIREGUARD)		+= wireguard/
 obj-$(CONFIG_INET)		+= ipv4/
 obj-$(CONFIG_XFRM)		+= xfrm/
 obj-$(CONFIG_UNIX)		+= unix/
@@ -81,3 +82,5 @@ obj-y				+= l3mdev/
 endif
 obj-$(CONFIG_QRTR)		+= qrtr/
 obj-$(CONFIG_NET_NCSI)		+= ncsi/
+obj-$(CONFIG_RMNET_DATA) += rmnet_data/
+obj-$(CONFIG_IPC_ROUTER)	+= ipc_router/
