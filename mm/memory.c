@@ -401,7 +401,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pgtable_t token = pmd_pgtable(*pmd);
 	pmd_clear(pmd);
 	pte_free_tlb(tlb, token, addr);
-	mm_dec_nr_ptes(tlb->mm);
+	atomic_long_dec(&tlb->mm->nr_ptes);
 }
 
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
@@ -469,7 +469,6 @@ static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 	pud = pud_offset(pgd, start);
 	pgd_clear(pgd);
 	pud_free_tlb(tlb, pud, start);
-	mm_dec_nr_puds(tlb->mm);
 }
 
 /*
@@ -596,7 +595,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 
 	ptl = pmd_lock(mm, pmd);
 	if (likely(pmd_none(*pmd))) {	/* Has another populated it ? */
-		mm_inc_nr_ptes(mm);
+		atomic_long_inc(&mm->nr_ptes);
 		pmd_populate(mm, pmd, new);
 		new = NULL;
 	}
@@ -3118,7 +3117,7 @@ static int pte_alloc_one_map(struct fault_env *fe)
 			goto map_pte;
 		}
 
-		mm_inc_nr_ptes(vma->vm_mm);
+		atomic_long_inc(&vma->vm_mm->nr_ptes);
 		pmd_populate(vma->vm_mm, fe->pmd, fe->prealloc_pte);
 		spin_unlock(fe->ptl);
 		fe->prealloc_pte = 0;
@@ -4218,13 +4217,10 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	smp_wmb(); /* See comment in __pte_alloc */
 
 	spin_lock(&mm->page_table_lock);
-	if (pgd_present(*pgd)) {
-		/* Another has populated it */
+	if (pgd_present(*pgd))		/* Another has populated it */
 		pud_free(mm, new);
-	} else {
-		mm_inc_nr_puds(mm);
+	else
 		pgd_populate(mm, pgd, new);
-	}
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }

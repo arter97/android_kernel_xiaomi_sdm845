@@ -431,16 +431,17 @@ int filemap_flush(struct address_space *mapping)
 }
 EXPORT_SYMBOL(filemap_flush);
 
-static void __filemap_fdatawait_range(struct address_space *mapping,
+static int __filemap_fdatawait_range(struct address_space *mapping,
 				     loff_t start_byte, loff_t end_byte)
 {
 	pgoff_t index = start_byte >> PAGE_SHIFT;
 	pgoff_t end = end_byte >> PAGE_SHIFT;
 	struct pagevec pvec;
 	int nr_pages;
+	int ret = 0;
 
 	if (end_byte < start_byte)
-		return;
+		goto out;
 
 	pagevec_init(&pvec, 0);
 	while (index <= end) {
@@ -455,11 +456,14 @@ static void __filemap_fdatawait_range(struct address_space *mapping,
 			struct page *page = pvec.pages[i];
 
 			wait_on_page_writeback(page);
-			ClearPageError(page);
+			if (TestClearPageError(page))
+				ret = -EIO;
 		}
 		pagevec_release(&pvec);
 		cond_resched();
 	}
+out:
+	return ret;
 }
 
 /**
@@ -479,8 +483,14 @@ static void __filemap_fdatawait_range(struct address_space *mapping,
 int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
 			    loff_t end_byte)
 {
-	__filemap_fdatawait_range(mapping, start_byte, end_byte);
-	return filemap_check_errors(mapping);
+	int ret, ret2;
+
+	ret = __filemap_fdatawait_range(mapping, start_byte, end_byte);
+	ret2 = filemap_check_errors(mapping);
+	if (!ret)
+		ret = ret2;
+
+	return ret;
 }
 EXPORT_SYMBOL(filemap_fdatawait_range);
 
@@ -2677,6 +2687,14 @@ filler:
 		unlock_page(page);
 		goto out;
 	}
+
+	/*
+	 * A previous I/O error may have been due to temporary
+	 * failures.
+	 * Clear page error before actual read, PG_error will be
+	 * set again if read page fails.
+	 */
+	ClearPageError(page);
 	goto filler;
 
 out:

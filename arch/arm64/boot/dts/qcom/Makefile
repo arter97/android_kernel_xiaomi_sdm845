@@ -60,6 +60,7 @@ perseus-mp-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 
 else
 dtb-$(CONFIG_ARCH_SDM845) += beryllium-mp-v2.1.dtb
+dtb-$(CONFIG_ARCH_SDM845) += beryllium-mp-v2.1-pixelhal.dtb
 endif
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)

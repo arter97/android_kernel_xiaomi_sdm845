@@ -871,7 +871,8 @@ config IKHEADERS
 
 config LOG_BUF_SHIFT
 	int "Kernel log buffer size (16 => 64KB, 17 => 128KB)"
-	range 12 25
+	range 12 25 if !H8300
+	range 12 19 if H8300
 	default 17
 	depends on PRINTK
 	help
@@ -1563,6 +1564,10 @@ config EXECPROG_DST
 config EXECPROG_WAIT_FOR
 	string "Wait for this file on the userspace before execution"
 	default "/dev/socket/property_service"
+	help
+	  execprog will wait for this file on the userspace before execution.
+	  This config can have multiple entries by separating with colons.
+	  e.g. CONFIG_EXECPROG_WAIT_FOR="/dev/.coldboot_done:/dev/memcg/system"
 
 endif
 

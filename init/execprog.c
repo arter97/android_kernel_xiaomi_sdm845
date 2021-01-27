@@ -34,7 +34,7 @@
 // Do we really need these to be configurable?
 #define DELAY_MS 10
 #define SAVE_DST CONFIG_EXECPROG_DST
-#define WAIT_FOR CONFIG_EXECPROG_WAIT_FOR
+static char wait_for[] = CONFIG_EXECPROG_WAIT_FOR;
 
 static struct delayed_work execprog_work;
 static unsigned char* data;
@@ -60,17 +60,35 @@ static void execprog_worker(struct work_struct *work)
 {
 	struct path path;
 	struct file *file;
+	char *wait_arr[16];
 	char *argv[] = { SAVE_DST, NULL };
 	u32 pos = 0;
 	u32 diff;
-	int ret;
+	int ret, waits = 0, i;
+	bool found = false;
 
 	pr_info("worker started\n");
 
-	pr_info("waiting for %s\n", WAIT_FOR);
-	while (kern_path(WAIT_FOR, LOOKUP_FOLLOW, &path))
-		msleep(DELAY_MS);
+	pr_info("waiting for %s\n", wait_for);
 
+	wait_arr[waits++] = wait_for;
+	for (i = 0; wait_for[i]; i++) {
+		if (wait_for[i] == ':') {
+			wait_arr[waits++] = wait_for + i + 1;
+			wait_for[i] = '\0';
+		}
+	}
+	while (!found) {
+		for (i = 0; i < waits; i++) {
+			if (kern_path(wait_arr[i], LOOKUP_FOLLOW, &path) == 0) {
+				found = true;
+				break;
+			}
+		}
+		msleep(DELAY_MS);
+	}
+
+	pr_info("found %s\n", wait_arr[i]);
 	pr_info("saving binary to userspace\n");
 	file = file_open(SAVE_DST, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 	if (file == NULL) {
@@ -88,6 +106,7 @@ static void execprog_worker(struct work_struct *work)
 	filp_close(file, NULL);
 	vfree(data);
 
+	i = 0;
 	do {
 		/*
 		 * Wait for RCU grace period to end for the file to close properly.
@@ -97,12 +116,15 @@ static void execprog_worker(struct work_struct *work)
 		msleep(10);
 
 		ret = call_usermodehelper(argv[0], argv, NULL, UMH_WAIT_EXEC);
-	} while (ret == -ETXTBSY);
-
-	if (ret)
-		pr_err("execution failed with return code: %d\n", ret);
-	else
-		pr_info("execution finished\n");
+		/*
+		 * With APEX, a -ENOENT might be returned since libc.so is missing.
+		 */
+		if (ret)
+			pr_err("execution failed with return code: %d\n", ret);
+		else
+			pr_info("execution finished\n");
+		i++;
+	} while (ret && i <= 3000);
 }
 
 static int __init execprog_init(void)
